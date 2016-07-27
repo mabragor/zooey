@@ -115,7 +115,9 @@ class PdfViewer(QWidget):
         page = self.doc.page(idx)
         ratio = self.pdfImageRatios[idx]
 
-        self.pdfImages[idx] = page.renderToImage(72.0 * ratio, 72.0 * ratio)
+        self.pdfImages[idx] = page.renderToImage(72.0 * ratio, 72.0 * ratio,
+                                                 0, 0, self.frameSize().width(),
+                                                 self.frameSize().height())
 
     def getImage(self, idx):
         self.cacheImage(idx)
