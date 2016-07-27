@@ -30,6 +30,12 @@ class PdfViewer(QWidget):
         elif event.key() == QtCore.Qt.Key_Escape:
             self.stop()
 
+    def wheelEvent(self, event):
+        step = event.delta()/8/15
+        self.pdfImageRatios[self.currentPage] *= (1.0 + 0.1 * step)
+        self.cacheImage(self.currentPage, True)
+        self.update()
+
     def paintEvent(self, event):
         if self.isBlanked:
             return
@@ -59,6 +65,7 @@ class PdfViewer(QWidget):
                                and popplerqt4.Poppler.Document.TextAntialiasing)
         self.currentPage = 0
         self.pdfImages = [None for i in range(self.doc.numPages())]
+        self.pdfImageRatios = [1.0 for i in range(self.doc.numPages())]
         self.cacheImage(self.currentPage)
 
     def display(self):
@@ -97,21 +104,18 @@ class PdfViewer(QWidget):
             self.currentPages = idx
             self.display()
 
-    def cacheImage(self, idx):
+    def cacheImage(self, idx, force=None):
         if idx >= self.doc.numPages():
             return
 
-        if self.pdfImages[idx] is not None:
+        if (self.pdfImages[idx] is not None
+            and force is None):
             return
 
         page = self.doc.page(idx)
-        ratio = 1.0 * self.frameSize().width() / page.pageSize().width()
-        yratio = 1.0 * self.frameSize().height() / page.pageSize().height()
+        ratio = self.pdfImageRatios[idx]
 
-        if yratio < ratio:
-            ratio = yratio
-
-        self.pdfImages[idx] = page.renderToImage(72 * ratio, 72 * ratio)
+        self.pdfImages[idx] = page.renderToImage(72.0 * ratio, 72.0 * ratio)
 
     def getImage(self, idx):
         self.cacheImage(idx)
