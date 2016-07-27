@@ -2,7 +2,8 @@
 
 import sys
 from PyQt5.QtWidgets import QApplication, QWidget
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QPalette, QPainter
+
 
 class Example(QWidget):
 
