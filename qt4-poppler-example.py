@@ -31,9 +31,9 @@ class PdfViewer(QWidget):
             self.stop()
 
     def wheelEvent(self, event):
-        step = event.delta()/8/15
+        step = float(event.delta())/8/15/20
         self.pdfImageRatios[self.currentPage] *= (1.0 + 0.1 * step)
-        self.cacheImage(self.currentPage, True)
+        self.doubleCacheImage(self.currentPage, True)
         self.update()
 
     def paintEvent(self, event):
@@ -115,9 +115,23 @@ class PdfViewer(QWidget):
         page = self.doc.page(idx)
         ratio = self.pdfImageRatios[idx]
 
+        height = self.frameSize().height()
+        width = float(height) * (float(page.pageSize().width()) / page.pageSize().height())
+
         self.pdfImages[idx] = page.renderToImage(72.0 * ratio, 72.0 * ratio,
-                                                 0, 0, self.frameSize().width(),
-                                                 self.frameSize().height())
+                                                 0, 0, width, height)
+
+    def doubleCacheImage(self, idx, force=None):
+        self.cacheImage(idx, force)
+
+        # now we want to add another image to the same layer
+        self.cacheImage(idx+1, force)
+        painter = QPainter()
+        painter.begin(self.pdfImages[idx])
+        painter.drawImage(0, 0, self.getImage(idx+1),
+                          sw = self.pdfImages[idx].width()/2,
+                          sh = self.pdfImages[idx].height()/2)
+        painter.end()
 
     def getImage(self, idx):
         self.cacheImage(idx)
