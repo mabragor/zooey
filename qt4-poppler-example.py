@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 
 import sys
-from PyQt4.QtGui import QPalette, QWidget, QApplication, QPainter
+from PyQt4.QtGui import QPalette, QWidget, QApplication, QPainter, QColor
 from PyQt4 import QtCore
+from PyQt4 import Qt
 
 import popplerqt4
 
@@ -128,7 +129,13 @@ class PdfViewer(QWidget):
         self.cacheImage(idx+1, force)
         painter = QPainter()
         painter.begin(self.pdfImages[idx])
-        painter.drawImage(0, 0, self.getImage(idx+1),
+        painter.setOpacity(0.5)
+
+        image2 = self.getImage(idx+1).copy()
+        mask = image2.createMaskFromColor(image2.pixel(0, 0), 1)
+        image2.setAlphaChannel(mask)
+
+        painter.drawImage(0, 0, image2,
                           sw = self.pdfImages[idx].width()/2,
                           sh = self.pdfImages[idx].height()/2)
         painter.end()
