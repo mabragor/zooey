@@ -7,11 +7,14 @@ from PyQt4 import Qt
 
 import popplerqt4
 
+PDF_BASE_RESOLUTION = 72.0
+
 class ScrollPdfToMouse(QWidget):
     def __init__(self):
         self.doc = None
         super(ScrollPdfToMouse, self).__init__(None)
 
+        self.loadPDF()
         self.initUI()
 
     def initUI(self):
@@ -23,6 +26,31 @@ class ScrollPdfToMouse(QWidget):
 
         self.showMaximized()
         self.show()
+
+    def loadPDF(self):
+        self.showMaximized()
+        self.hide()
+        fname = "/home/popolit/drafts/sketches/knots/ammm-knots-c/13-doublet-tree-for-2.pdf"
+        self.doc = popplerqt4.Poppler.Document.load(fname)
+        self.doc.setRenderHint(popplerqt4.Poppler.Document.Antialiasing
+                               and popplerqt4.Poppler.Document.TextAntialiasing)
+
+        my_height = self.frameSize().height()
+        my_width = self.frameSize().width()
+
+        self.page = self.doc.page(0)
+        self.ratio = max(float(self.page.pageSize().width())/my_width,
+                         float(self.page.pageSize().height())/my_height)
+
+        # set the original rendering parameters -- the whole page fits on screen
+        self.w = float(self.page.pageSize().width()) / self.ratio
+        self.h = float(self.page.pageSize().height()) / self.ratio
+        self.x = 0
+        self.y = 0
+        
+        self.pdf_image = self.page.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+                                                 PDF_BASE_RESOLUTION / self.ratio,
+                                                 self.x, self.y, self.w, self.h)
         
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:
@@ -34,16 +62,12 @@ class ScrollPdfToMouse(QWidget):
         self.doubleCacheImage(self.currentPage, True)
         self.update()
 
-    # def paintEvent(self, event):
-    #     img = self.getImage(self.currentPage)
-    #     if img is None:
-    #         return
+    def paintEvent(self, event):
+        x = (self.frameSize().width() - self.pdf_image.width())/2
+        y = (self.frameSize().height() - self.pdf_image.height())/2
 
-    #     x = (self.frameSize().width() - img.width())/2
-    #     y = (self.frameSize().height() - img.height())/2
-
-    #     painter = QPainter(self)
-    #     painter.drawImage(x, y, img, 0, 0, 0, 0)
+        painter = QPainter(self)
+        painter.drawImage(x, y, self.pdf_image, 0, 0, 0, 0)
 
     def getCurrentPage(self):
         return self.currentPage + 1
