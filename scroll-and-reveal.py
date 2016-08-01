@@ -1,9 +1,10 @@
 #!/usr/bin/python3
 
 import sys
-from PyQt4.QtGui import QPalette, QWidget, QApplication, QPainter, QColor, QCursor, QImage
+from PyQt4.QtGui import (QPalette, QWidget, QApplication, QPainter, QColor, QCursor, QImage)
 from PyQt4 import QtCore
 from PyQt4 import Qt
+from PyQt4.QtCore import QRect
 
 import popplerqt4
 import time
@@ -14,6 +15,8 @@ THE_Y = 0
 
 RATIO_MIN = 0.4
 RATIO_FULL = 0.2
+
+MAGIC_RECT = QRect(100,100,100,100)
 
 class ScrollAndReveal(QWidget):
     def __init__(self):
@@ -59,6 +62,8 @@ class ScrollAndReveal(QWidget):
         self.ratio = max(float(self.page1.pageSize().width())/my_width,
                          float(self.page1.pageSize().height())/my_height)
 
+        print "Page width:", self.page1.pageSize().width()
+        
         # set the original rendering parameters -- the whole page fits on screen
         self.w = float(self.page1.pageSize().width()) / self.ratio
         self.h = float(self.page1.pageSize().height()) / self.ratio
@@ -76,16 +81,30 @@ class ScrollAndReveal(QWidget):
             image1 = self.page1.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
                                               PDF_BASE_RESOLUTION / self.ratio,
                                               self.x, self.y, self.w, self.h)
-            image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
-                                              PDF_BASE_RESOLUTION / self.ratio,
-                                              self.x, self.y, self.w, self.h)
-            self.pdf_image = QImage(image1.width(),
-                                    image1.height(),
-                                    image1.format())
-            self.pdf_image.fill(QtCore.Qt.white)
+            # image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+            #                                   PDF_BASE_RESOLUTION / self.ratio,
+            #                                   self.x, self.y, self.w, self.h)
+            # self.pdf_image = QImage(image1.width(),
+            #                         image1.height(),
+            #                         image1.format())
+            self.pdf_image = image1.copy()
+
+            x1 = MAGIC_RECT.x() / self.ratio - self.x
+            y1 = MAGIC_RECT.y() / self.ratio - self.y
+            h1 = MAGIC_RECT.height() / self.ratio
+            w1 = MAGIC_RECT.width() / self.ratio
+            
+            # self.pdf_image.fill(QtCore.Qt.white)
 
             painter = QPainter()
             painter.begin(self.pdf_image)
+            painter.setClipRect(x1, y1, w1, h1)
+
+            # clear the magic region
+            painter.setOpacity(1.0)
+            painter.fillRect(x1, y1, w1, h1, QtCore.Qt.white)
+
+            # draw semi-transparent version of image1 on top of it
             if self.ratio < RATIO_FULL:
                 painter.setOpacity(0.0)
             else:
@@ -97,18 +116,18 @@ class ScrollAndReveal(QWidget):
             painter.drawImage(0, 0, image1)
             painter.end()
             
-            painter = QPainter()
-            painter.begin(self.pdf_image)
-            if self.ratio < RATIO_FULL:
-                painter.setOpacity(1.0)
-            else:
-                painter.setOpacity(float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
+            # painter = QPainter()
+            # painter.begin(self.pdf_image)
+            # if self.ratio < RATIO_FULL:
+            #     painter.setOpacity(1.0)
+            # else:
+            #     painter.setOpacity(float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
 
-            mask = image2.createMaskFromColor(QtCore.Qt.white, 1) # image2.pixel(0, 0), 1)
-            image2.setAlphaChannel(mask)
+            # mask = image2.createMaskFromColor(QtCore.Qt.white, 1) # image2.pixel(0, 0), 1)
+            # image2.setAlphaChannel(mask)
 
-            painter.drawImage(0, 0, image2)
-            painter.end()
+            # painter.drawImage(0, 0, image2)
+            # painter.end()
         
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:
