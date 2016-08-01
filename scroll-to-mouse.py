@@ -75,7 +75,7 @@ class ScrollPdfToMouse(QWidget):
         print "I'm in a wheel event1:", self.height(), self.h
         print "I'm in a wheel event:", pos.x(), pos.y(), x_image, y_image
         
-        self.scale_pdf_image_geometry(dr=0.5 * float(event.delta())/8/15/20 * self.ratio,
+        self.scale_pdf_image_geometry(dr=0.5 * float(event.delta())/8/15/20, # * self.ratio,
                                       x_m = pos.x() - x_image, y_m = pos.y() - y_image)
         self.rerender_pdf_image()
         self.update()
