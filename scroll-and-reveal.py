@@ -16,7 +16,7 @@ THE_Y = 0
 RATIO_MIN = 0.4
 RATIO_FULL = 0.2
 
-MAGIC_RECT = QRect(100,100,100,100)
+MAGIC_RECT = QRect(250,120,50,50)
 
 class ScrollAndReveal(QWidget):
     def __init__(self):
@@ -81,12 +81,10 @@ class ScrollAndReveal(QWidget):
             image1 = self.page1.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
                                               PDF_BASE_RESOLUTION / self.ratio,
                                               self.x, self.y, self.w, self.h)
-            # image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
-            #                                   PDF_BASE_RESOLUTION / self.ratio,
-            #                                   self.x, self.y, self.w, self.h)
-            # self.pdf_image = QImage(image1.width(),
-            #                         image1.height(),
-            #                         image1.format())
+            image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION, # / self.ratio,
+                                              PDF_BASE_RESOLUTION # / self.ratio,
+                                              )
+                                              # self.x, self.y, self.w, self.h)
             self.pdf_image = image1.copy()
 
             x1 = MAGIC_RECT.x() / self.ratio - self.x
@@ -115,19 +113,23 @@ class ScrollAndReveal(QWidget):
 
             painter.drawImage(0, 0, image1)
             painter.end()
-            
-            # painter = QPainter()
-            # painter.begin(self.pdf_image)
-            # if self.ratio < RATIO_FULL:
-            #     painter.setOpacity(1.0)
-            # else:
-            #     painter.setOpacity(float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
 
-            # mask = image2.createMaskFromColor(QtCore.Qt.white, 1) # image2.pixel(0, 0), 1)
-            # image2.setAlphaChannel(mask)
+            # draw slowly revealing image2 in our magic rect
+            painter = QPainter()
+            painter.begin(self.pdf_image)
+            painter.setClipRect(x1, y1, w1, h1)
+            if self.ratio < RATIO_FULL:
+                painter.setOpacity(1.0)
+            else:
+                painter.setOpacity(float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
 
-            # painter.drawImage(0, 0, image2)
-            # painter.end()
+            mask = image2.createMaskFromColor(QtCore.Qt.white, 1) # image2.pixel(0, 0), 1)
+            image2.setAlphaChannel(mask)
+
+            painter.drawImage(QRect(x1, y1, w1, h1),
+                              image2,
+                              image2.rect())
+            painter.end()
         
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:
