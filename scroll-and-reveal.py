@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 import sys
-from PyQt4.QtGui import QPalette, QWidget, QApplication, QPainter, QColor, QCursor
+from PyQt4.QtGui import QPalette, QWidget, QApplication, QPainter, QColor, QCursor, QImage
 from PyQt4 import QtCore
 from PyQt4 import Qt
 
@@ -12,16 +12,19 @@ PDF_BASE_RESOLUTION = 72.0
 THE_X = 0
 THE_Y = 0
 
-class ScrollPdfToMouse(QWidget):
+RATIO_MIN = 0.4
+RATIO_FULL = 0.2
+
+class ScrollAndReveal(QWidget):
     def __init__(self):
         self.doc = None
-        super(ScrollPdfToMouse, self).__init__(None)
+        super(ScrollAndReveal, self).__init__(None)
 
         self.loadPDF()
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle('Scroll PDF to mouse')
+        self.setWindowTitle('Scroll PDF and reveal another one')
 
         p = QPalette()
         p.setColor(QPalette.Background, QtCore.Qt.black);
@@ -33,11 +36,16 @@ class ScrollPdfToMouse(QWidget):
     def loadPDF(self):
         self.showMaximized()
         self.hide()
-        fname = "/home/popolit/drafts/sketches/knots/ammm-knots-c/13-doublet-tree-for-2.pdf"
-        self.doc = popplerqt4.Poppler.Document.load(fname)
-        self.doc.setRenderHint(popplerqt4.Poppler.Document.Antialiasing
-                               and popplerqt4.Poppler.Document.TextAntialiasing)
+        fname1 = "/home/popolit/drafts/sketches/knots/ammm-knots-c/13-doublet-tree-for-2.pdf"
+        fname2 = "/home/popolit/drafts/sketches/knots/ammm-knots-c/17-3-3-2-and-3-3-1-1-from-2.pdf"
+        self.doc1 = popplerqt4.Poppler.Document.load(fname1)
+        self.doc1.setRenderHint(popplerqt4.Poppler.Document.Antialiasing
+                                and popplerqt4.Poppler.Document.TextAntialiasing)
+        self.doc2 = popplerqt4.Poppler.Document.load(fname2)
+        self.doc2.setRenderHint(popplerqt4.Poppler.Document.Antialiasing
+                                and popplerqt4.Poppler.Document.TextAntialiasing)
 
+        
         time.sleep(1)
         self.init_pdf_image_geometry()
         self.rerender_pdf_image()
@@ -46,22 +54,61 @@ class ScrollPdfToMouse(QWidget):
         my_height = self.height()
         my_width = self.width()
 
-        self.page = self.doc.page(0)
-        self.ratio = max(float(self.page.pageSize().width())/my_width,
-                         float(self.page.pageSize().height())/my_height)
+        self.page1 = self.doc1.page(0)
+        self.page2 = self.doc2.page(0)
+        self.ratio = max(float(self.page1.pageSize().width())/my_width,
+                         float(self.page1.pageSize().height())/my_height)
 
         # set the original rendering parameters -- the whole page fits on screen
-        self.w = float(self.page.pageSize().width()) / self.ratio
-        self.h = float(self.page.pageSize().height()) / self.ratio
+        self.w = float(self.page1.pageSize().width()) / self.ratio
+        self.h = float(self.page1.pageSize().height()) / self.ratio
         self.x = THE_X
         self.y = THE_Y
 
         print "In init pdf image:", self.h, my_height, self.frameSize().height()
         
     def rerender_pdf_image(self):
-        self.pdf_image = self.page.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
-                                                 PDF_BASE_RESOLUTION / self.ratio,
-                                                 self.x, self.y, self.w, self.h)
+        if self.ratio > RATIO_MIN:
+            self.pdf_image = self.page1.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+                                                     PDF_BASE_RESOLUTION / self.ratio,
+                                                     self.x, self.y, self.w, self.h)
+        else:
+            image1 = self.page1.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+                                              PDF_BASE_RESOLUTION / self.ratio,
+                                              self.x, self.y, self.w, self.h)
+            image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+                                              PDF_BASE_RESOLUTION / self.ratio,
+                                              self.x, self.y, self.w, self.h)
+            self.pdf_image = QImage(image1.width(),
+                                    image1.height(),
+                                    image1.format())
+            self.pdf_image.fill(QtCore.Qt.white)
+
+            painter = QPainter()
+            painter.begin(self.pdf_image)
+            if self.ratio < RATIO_FULL:
+                painter.setOpacity(0.0)
+            else:
+                painter.setOpacity(1.0 - float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
+
+            mask = image1.createMaskFromColor(QtCore.Qt.white, 1) # image1.pixel(0, 0), 1)
+            image1.setAlphaChannel(mask)
+
+            painter.drawImage(0, 0, image1)
+            painter.end()
+            
+            painter = QPainter()
+            painter.begin(self.pdf_image)
+            if self.ratio < RATIO_FULL:
+                painter.setOpacity(1.0)
+            else:
+                painter.setOpacity(float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
+
+            mask = image2.createMaskFromColor(QtCore.Qt.white, 1) # image2.pixel(0, 0), 1)
+            image2.setAlphaChannel(mask)
+
+            painter.drawImage(0, 0, image2)
+            painter.end()
         
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:
@@ -72,7 +119,7 @@ class ScrollPdfToMouse(QWidget):
         x_image = float(self.width() - self.w)/2
         y_image = float(self.height() - self.h)/2
 
-        print "I'm in a wheel event1:", self.height(), self.h
+        print "I'm in a wheel event1:", self.height(), self.h, self.ratio
         print "I'm in a wheel event:", pos.x(), pos.y(), x_image, y_image
         
         self.scale_pdf_image_geometry(dr=0.1 * float(event.delta())/8/15/20, # * self.ratio,
@@ -198,7 +245,7 @@ class ScrollPdfToMouse(QWidget):
 if __name__ == '__main__':
     
     app = QApplication(sys.argv)
-    ex = ScrollPdfToMouse()
+    ex = ScrollAndReveal()
     # ex.load("/home/popolit/code/python-qt5-tutorial/sample-pdf.pdf")
     # ex.start()
     sys.exit(app.exec_())
