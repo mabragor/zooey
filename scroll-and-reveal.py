@@ -70,6 +70,13 @@ class ScrollAndReveal(QWidget):
         self.x = THE_X
         self.y = THE_Y
 
+        self.image1 = self.page1.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+                                               PDF_BASE_RESOLUTION / self.ratio)
+        self.image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+                                               PDF_BASE_RESOLUTION / self.ratio)
+
+        self.begin_ratio = self.ratio
+        
         print "In init pdf image:", self.h, my_height, self.frameSize().height()
         
     def rerender_pdf_image(self):
@@ -78,58 +85,69 @@ class ScrollAndReveal(QWidget):
                                                      PDF_BASE_RESOLUTION / self.ratio,
                                                      self.x, self.y, self.w, self.h)
         else:
-            image1 = self.page1.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
-                                              PDF_BASE_RESOLUTION / self.ratio,
-                                              self.x, self.y, self.w, self.h)
-            image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION, # / self.ratio,
-                                              PDF_BASE_RESOLUTION # / self.ratio,
-                                              )
-                                              # self.x, self.y, self.w, self.h)
-            self.pdf_image = image1.copy()
+            # image1 = self.page1.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
+            #                                   PDF_BASE_RESOLUTION / self.ratio,
+            #                                   self.x, self.y, self.w, self.h)
+            # image2 = self.page2.renderToImage(PDF_BASE_RESOLUTION, # / self.ratio,
+            #                                   PDF_BASE_RESOLUTION # / self.ratio,
+            #                                   )
+            #                                   # self.x, self.y, self.w, self.h)
+            self.pdf_image = QImage(self.w, self.h, self.image1.format())
+            self.pdf_image.fill(QtCore.Qt.white)
 
+            painter = QPainter()
+            painter.begin(self.pdf_image)
+            painter.drawImage(self.pdf_image.rect(),
+                              self.image1,
+                              QRect(self.x * self.ratio/self.begin_ratio,
+                                    self.y * self.ratio/self.begin_ratio,
+                                    self.w * self.ratio/self.begin_ratio,
+                                    self.h * self.ratio/self.begin_ratio))
+            painter.end()
+            
             x1 = MAGIC_RECT.x() / self.ratio - self.x
             y1 = MAGIC_RECT.y() / self.ratio - self.y
             h1 = MAGIC_RECT.height() / self.ratio
             w1 = MAGIC_RECT.width() / self.ratio
             
-            # self.pdf_image.fill(QtCore.Qt.white)
+            # # self.pdf_image.fill(QtCore.Qt.white)
 
-            painter = QPainter()
-            painter.begin(self.pdf_image)
-            painter.setClipRect(x1, y1, w1, h1)
+            # painter = QPainter()
+            # painter.begin(self.pdf_image)
+            # painter.setClipRect(x1, y1, w1, h1)
 
-            # clear the magic region
-            painter.setOpacity(1.0)
-            painter.fillRect(x1, y1, w1, h1, QtCore.Qt.white)
+            # # clear the magic region
+            # painter.setOpacity(1.0)
+            # painter.fillRect(x1, y1, w1, h1, QtCore.Qt.white)
 
-            # draw semi-transparent version of image1 on top of it
-            if self.ratio < RATIO_FULL:
-                painter.setOpacity(0.0)
-            else:
-                painter.setOpacity(1.0 - float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
+            # # draw semi-transparent version of image1 on top of it
+            # if self.ratio < RATIO_FULL:
+            #     painter.setOpacity(0.0)
+            # else:
+            #     painter.setOpacity(1.0 - float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
 
-            mask = image1.createMaskFromColor(QtCore.Qt.white, 1) # image1.pixel(0, 0), 1)
-            image1.setAlphaChannel(mask)
+            # mask = image1.createMaskFromColor(QtCore.Qt.white, 1) # image1.pixel(0, 0), 1)
+            # image1.setAlphaChannel(mask)
 
-            painter.drawImage(0, 0, image1)
-            painter.end()
+            # painter.drawImage(0, 0, image1)
+            # painter.end()
 
-            # draw slowly revealing image2 in our magic rect
-            painter = QPainter()
-            painter.begin(self.pdf_image)
-            painter.setClipRect(x1, y1, w1, h1)
-            if self.ratio < RATIO_FULL:
-                painter.setOpacity(1.0)
-            else:
-                painter.setOpacity(float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
+            # # draw slowly revealing image2 in our magic rect
+            # painter = QPainter()
+            # painter.begin(self.pdf_image)
+            # painter.setClipRect(x1, y1, w1, h1)
+            # if self.ratio < RATIO_FULL:
+            #     painter.setOpacity(1.0)
+            # else:
+            #     painter.setOpacity(float(self.ratio - RATIO_MIN)/(RATIO_FULL - RATIO_MIN))
 
-            mask = image2.createMaskFromColor(QtCore.Qt.white, 1) # image2.pixel(0, 0), 1)
-            image2.setAlphaChannel(mask)
+            # mask = image2.createMaskFromColor(QtCore.Qt.white, 1) # image2.pixel(0, 0), 1)
+            # image2.setAlphaChannel(mask)
 
-            painter.drawImage(QRect(x1, y1, w1, h1),
-                              image2,
-                              image2.rect())
-            painter.end()
+            # painter.drawImage(QRect(x1, y1, w1, h1),
+            #                   image2,
+            #                   image2.rect())
+            # painter.end()
         
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:
