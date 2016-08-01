@@ -6,8 +6,11 @@ from PyQt4 import QtCore
 from PyQt4 import Qt
 
 import popplerqt4
+import time
 
 PDF_BASE_RESOLUTION = 72.0
+THE_X = 0
+THE_Y = 0
 
 class ScrollPdfToMouse(QWidget):
     def __init__(self):
@@ -35,12 +38,13 @@ class ScrollPdfToMouse(QWidget):
         self.doc.setRenderHint(popplerqt4.Poppler.Document.Antialiasing
                                and popplerqt4.Poppler.Document.TextAntialiasing)
 
+        time.sleep(1)
         self.init_pdf_image_geometry()
         self.rerender_pdf_image()
 
     def init_pdf_image_geometry(self):
-        my_height = self.frameSize().height()
-        my_width = self.frameSize().width()
+        my_height = self.height()
+        my_width = self.width()
 
         self.page = self.doc.page(0)
         self.ratio = max(float(self.page.pageSize().width())/my_width,
@@ -49,9 +53,11 @@ class ScrollPdfToMouse(QWidget):
         # set the original rendering parameters -- the whole page fits on screen
         self.w = float(self.page.pageSize().width()) / self.ratio
         self.h = float(self.page.pageSize().height()) / self.ratio
-        self.x = 0
-        self.y = 0
+        self.x = THE_X
+        self.y = THE_Y
 
+        print "In init pdf image:", self.h, my_height, self.frameSize().height()
+        
     def rerender_pdf_image(self):
         self.pdf_image = self.page.renderToImage(PDF_BASE_RESOLUTION / self.ratio,
                                                  PDF_BASE_RESOLUTION / self.ratio,
@@ -63,20 +69,28 @@ class ScrollPdfToMouse(QWidget):
 
     def wheelEvent(self, event):
         pos = QCursor().pos()
-        x_image = float(self.frameSize().width() - self.w)/2
-        y_image = float(self.frameSize().height() - self.h)/2
+        x_image = float(self.width() - self.w)/2
+        y_image = float(self.height() - self.h)/2
 
-        print "I'm in a wheel event", pos.x(), pos.y(), x_image, y_image
+        print "I'm in a wheel event1:", self.height(), self.h
+        print "I'm in a wheel event:", pos.x(), pos.y(), x_image, y_image
         
-        self.scale_pdf_image_geometry(dr=0.1 * float(event.delta())/8/15/20 * self.ratio,
+        self.scale_pdf_image_geometry(dr=0.5 * float(event.delta())/8/15/20 * self.ratio,
                                       x_m = pos.x() - x_image, y_m = pos.y() - y_image)
         self.rerender_pdf_image()
         self.update()
 
     def scale_pdf_image_geometry(self, x_m=0, y_m=0, dr=0.1):
         ratio2 = self.ratio + dr
-        self.x = float(self.x - x_m) * self.ratio/ratio2 + x_m
-        self.y = float(self.y - y_m) * self.ratio/ratio2 + y_m
+        # print "In scale1:", self.x
+        # self.x = float(self.x - x_m) * self.ratio/ratio2 + x_m
+        # print "In scale2:", self.x
+        # self.y = float(self.y - y_m) * self.ratio/ratio2 + y_m
+        # self.x *= self.ratio/ratio2
+        # self.y *= self.ratio/ratio2
+        self.x = float(self.x + x_m) * self.ratio/ratio2 - x_m
+        self.y = float(self.y + y_m) * self.ratio/ratio2 - y_m
+        
         self.ratio = ratio2
         
     def paintEvent(self, event):
