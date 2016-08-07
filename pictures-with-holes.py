@@ -43,7 +43,39 @@ class PictureWithHole(object):
         if self.render_ratio > MIN_HOLE_RATIO:
             return self.hole.intersected(self.part)
         return None
-        
+
+    def sync_child_pic(self):
+        if self.hole_seen_p():
+            if self.child_pic is None:
+                self.child_pic = PictureWithHole(random_sketches_fname())
+        else:
+            self.child_pic = None    
+
+    def recursive_draw(self, image):
+        painter = QPainter(image)
+        painter.begin()
+        self.draw(painter)
+        painter.end()
+        if self.child_pic is not None:
+            self.child_pic.recursive_draw(image)
+
+    def draw(self, painter):
+        painter.setOpacity(child_opacity(self.render_ratio))
+        painter.drawImage(self.dest, self.image, self.part)
+        it = self.hole_seen_p()
+        if it:
+            its_dst = linear_transform(self.part, self.dest)(it)
+            painter.setOpacity(1.0)
+            painter.fillRect(its_dst, QtCore.Qt.white)
+            painter.setOpacity(parent_opacity(self.render_ratio))
+            painter.drawImage(self.dst_it, self.image, it)
+
+    def hole_takes_whole_qimage(self):
+        return self.hole.contains(self.part)
+    def takes_whole_qimage(self, image):
+        return self.dest.contains(image.rect())
+
+            
 class ScrollAndReveal(QWidget):
     def __init__(self):
         self.doc = None
@@ -163,17 +195,27 @@ class ScrollAndReveal(QWidget):
 
     def wheelEvent(self, event):
         pos = QCursor().pos()
-        x_image = float(self.width() - self.w)/2
-        y_image = float(self.height() - self.h)/2
+        x_image = float(self.width() - self.the_qimage.width())/2
+        y_image = float(self.height() - self.the_qimage.height())/2
+        x_m = pos.x() - x_image
+        y_m = pos.y() - y_image
+        self.pics.recursive_rescale_and_sync(x_m, y_m,
+                                             zoom = (1.0 + 0.1 * float(event.delta())/8/15/20),
+                                             image = self.the_qimage)
+        if not self.pics.takes_whole_qimage(self.the_qimage):
+            self.pics = self.pics.glue_on_top(PictureWithHole(random_sketches_fname()),
+                                              self.the_qimage)
 
-        print "I'm in a wheel event1:", self.height(), self.h, self.ratio
-        print "I'm in a wheel event:", pos.x(), pos.y(), x_image, y_image
-        
-        self.scale_pdf_image_geometry(dr=0.1 * float(event.delta())/8/15/20, # * self.ratio,
-                                      x_m = pos.x() - x_image, y_m = pos.y() - y_image)
-        self.rerender_pdf_image()
+        if self.pics.hole_takes_whole_qimage(self.the_qimage):
+            self.pics = self.pics.child_pic
+
+        self.refresh_the_qimage()
+        self.pics.recursive_draw(self.the_qimage)
         self.update()
 
+    def refresh_the_qimage(self):
+        self.the_qimage.fill(QtCore.Qt.white)
+        
     def scale_pdf_image_geometry(self, x_m=0, y_m=0, dr=0.1):
         ratio2 = self.ratio + dr
         # print "In scale1:", self.x
