@@ -13,10 +13,29 @@ PDF_BASE_RESOLUTION = 72.0
 THE_X = 0
 THE_Y = 0
 
-RATIO_MIN = 0.4
-RATIO_FULL = 0.2
+MIN_HOLE_RATIO = 2
+FULL_HOLE_RATIO = 3
 
 MAGIC_RECT = QRect(250,120,50,50)
+
+def linear_transform(src, dst):
+    zoom_x = float(dst.width())/src.width()
+    zoom_y = float(dst.height())/src.height()
+    
+    return (lambda rect:
+            return QRect(dst.x() + float(rect.x() - src.x()) * zoom_x,
+                         dst.y() + float(rect.y() - src.y()) * zoom_y,
+                         rect.width() * zoom_x,
+                         rect.height() * zoom_y))
+            
+
+def child_opacity(ratio):
+    return min(float(ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
+               1.0)
+
+def parent_opacity(ratio):
+    return max(1.0 - float(ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
+               0.0)
 
 class PictureWithHole(object):
     def __init__(self):
@@ -75,7 +94,59 @@ class PictureWithHole(object):
     def takes_whole_qimage(self, image):
         return self.dest.contains(image.rect())
 
-            
+    def glue_on_top(self, new_pic, image):
+        new_pic.child_pic = self
+        new_pic.dest = image.rect()
+
+        # determine coordinates of the visible part of the hole in its parent coord system
+        top = new_pic.hole.top() + 1.0/4 * self.part.top()
+        bottom = new_pic.hole.top() + 1.0/4 * self.part.bottom()
+        left = new_pic.hole.left() + 1.0/4 * self.part.left()
+        right = new_pic.hole.left() + 1.0/4 * self.part.right()
+
+        new_pic.part = linear_transform(self.dest, QRect(left, top, right-left, bottom-top))(self.dest)
+        
+        new_pic.determine_render_ratio()
+        return new_pic
+
+    def determine_render_ratio(self):
+        ratio_x = float(self.dest.width())/self.part.width()
+        ratio_y = float(self.dest.height())/self.part.height()
+        if ratio_x != ratio_y:
+            raise "We don't support different ratios of PDFs right now"
+        else:
+            self.render_ratio = ratio_x
+
+    def recursive_rescale_and_sync(self, x_m, y_m, zoom=1.0, image=None):
+        # we rescale destination
+        self.dest = QRect((self.dest.x() - x_m) * zoom + x_m,
+                          (self.dest.y() - y_m) * zoom + y_m,
+                          self.dest.width() * zoom,
+                          self.dest.height() * zoom)
+
+        self.determine_render_ratio()
+
+        # we crop part and destination if they take more than qimage
+        if self.dest.x() < 0:
+            self.part.setLeft(self.part.x() - float(self.dest.x()) / self.render_ratio)
+            self.dest.setLeft(0)
+        if self.dest.y() < 0:
+            self.part.setTop(self.part.y() - float(self.dest.y()) / self.render_ratio)
+            self.dest.setTop(0)
+        if self.dest.right() > image.rect.right():
+            self.part.setRight(self.part.right()
+                               - float(self.dest.right()-image.rect.right())/self.render_ratio)
+            self.dest.setRight(image.rect.right())
+        if self.dest.bottom() > image.rect.bottom():
+            self.part.setBottom(self.part.bottom()
+                                - float(self.dest.bottom()-image.rect.bottom())/self.render_ratio)
+            self.dest.setBottom(image.rect.bottom())
+        
+        # we sync and recurse on a child
+        self.sync_child_pic()
+        if self.child_pic:
+            self.child_pic.recursive_rescale_and_sync(x_m, y_m, zoom=zoom, image=image)
+        
 class ScrollAndReveal(QWidget):
     def __init__(self):
         self.doc = None
