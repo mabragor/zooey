@@ -76,7 +76,7 @@ class PictureWithHole(object):
         self.render_ratio = None
         
         self.init_hole_coordinates()
-        print "Loaded:", fname, self.hole.x(), self.hole.y(), self.hole.width(), self.hole.height()
+        ## print "Loaded:", fname, self.hole.x(), self.hole.y(), self.hole.width(), self.hole.height()
 
     def init_hole_coordinates(self):
         w = self.image.width()
@@ -103,7 +103,7 @@ class PictureWithHole(object):
         self.draw(painter, toplevel=toplevel)
         painter.end()
         if self.child_pic is not None:
-            print "Drawing childpic"
+            ## print "Drawing childpic"
             self.child_pic.recursive_draw(image, toplevel=False)
 
     def draw(self, painter, toplevel=True):
@@ -111,11 +111,11 @@ class PictureWithHole(object):
             painter.setOpacity(1.0)
         else:
             painter.setOpacity(child_opacity(self.render_ratio))
-        print "Painter opacity:", painter.opacity(), self.render_ratio
+        ## print "Painter opacity:", painter.opacity(), self.render_ratio
         painter.drawImage(self.dest.toAlignedRect(), self.image, self.part.toAlignedRect())
 
         # mark, where the hole is
-        print "Hole:", self.hole, linear_transform(self.part, self.dest)(self.hole)
+        ## print "Hole:", self.hole, linear_transform(self.part, self.dest)(self.hole)
         oldOpacity = painter.opacity()
         painter.setPen(QtCore.Qt.black)
         painter.drawRect(linear_transform(self.part, self.dest)(self.hole))
@@ -132,7 +132,14 @@ class PictureWithHole(object):
     def hole_takes_whole_qimage(self):
         return self.hole.contains(self.part)
     def takes_whole_qimage(self, image):
-        return self.dest.contains(QRectF(image.rect()))
+        image_rect = QRectF(image.rect())
+        MARGIN = 5
+        image_rect.setLeft(image_rect.left() + MARGIN)
+        image_rect.setTop(image_rect.top() + MARGIN)
+        image_rect.setRight(image_rect.right() - MARGIN)
+        image_rect.setBottom(image_rect.bottom() - MARGIN)
+        # print "In takes_whole_qimage:", self.dest, image_rect
+        return self.dest.contains(image_rect)
 
     def glue_on_top(self, new_pic, image):
         new_pic.child_pic = self
@@ -168,21 +175,21 @@ class PictureWithHole(object):
 
         self.determine_render_ratio()
 
-        # # we crop part and destination if they take more than qimage
-        # if self.dest.x() < 0:
-        #     self.part.setLeft(self.part.x() - float(self.dest.x()) / self.render_ratio)
-        #     self.dest.setLeft(0)
-        # if self.dest.y() < 0:
-        #     self.part.setTop(self.part.y() - float(self.dest.y()) / self.render_ratio)
-        #     self.dest.setTop(0)
-        # if self.dest.right() > image.rect().right():
-        #     self.part.setRight(self.part.right()
-        #                        - float(self.dest.right()-image.rect().right())/self.render_ratio)
-        #     self.dest.setRight(image.rect().right())
-        # if self.dest.bottom() > image.rect().bottom():
-        #     self.part.setBottom(self.part.bottom()
-        #                         - float(self.dest.bottom()-image.rect().bottom())/self.render_ratio)
-        #     self.dest.setBottom(image.rect().bottom())
+        # we crop part and destination if they take more than qimage
+        if self.dest.x() < 0:
+            self.part.setLeft(self.part.x() - float(self.dest.x()) / self.render_ratio)
+            self.dest.setLeft(0)
+        if self.dest.y() < 0:
+            self.part.setTop(self.part.y() - float(self.dest.y()) / self.render_ratio)
+            self.dest.setTop(0)
+        if self.dest.right() > image.rect().right():
+            self.part.setRight(self.part.right()
+                               - float(self.dest.right()-image.rect().right())/self.render_ratio)
+            self.dest.setRight(image.rect().right())
+        if self.dest.bottom() > image.rect().bottom():
+            self.part.setBottom(self.part.bottom()
+                                - float(self.dest.bottom()-image.rect().bottom())/self.render_ratio)
+            self.dest.setBottom(image.rect().bottom())
         
         # we sync and recurse on a child
         self.sync_child_pic()
@@ -213,7 +220,7 @@ class PicturesWithHolesWidget(QWidget):
         
         self.init_pdf_image_geometry()
 
-        print self.pics.part, self.pics.dest, self.width(), self.height()
+        ## print self.pics.part, self.pics.dest, self.width(), self.height()
         
         self.refresh_the_qimage() # color=QtCore.Qt.transparent)
         self.pics.recursive_draw(self.the_qimage)
@@ -243,15 +250,17 @@ class PicturesWithHolesWidget(QWidget):
         x_m = pos.x() - x_image
         y_m = pos.y() - y_image
         zoom = (1.0 + 0.1 * float(event.delta())/8/15/20)
-        print "Zoom:", zoom
+        ## print "Zoom:", zoom
         self.pics.recursive_rescale_and_sync(x_m, y_m,
                                              zoom = zoom,
                                              image = self.the_qimage)
         if not self.pics.takes_whole_qimage(self.the_qimage):
+            print "Creating new top pic"
             self.pics = self.pics.glue_on_top(PictureWithHole(random_sketches_fname()),
                                               self.the_qimage)
 
         if self.pics.hole_takes_whole_qimage():
+            print "Switching to the child pic"
             self.pics = self.pics.child_pic
 
         self.refresh_the_qimage()
