@@ -212,6 +212,16 @@ class PicturesWithHolesWidget(QWidget):
 
         self.showMaximized()
         self.show()
+        
+        self.init_zoom_on_key()
+
+    def init_zoom_on_key(self):
+        self.zoom_timer = QtCore.QTimer()
+        self.zoom_timer.setInterval(10)
+        self.zoom_timer.timeout.connect(self.zoom_to_cursor)
+
+        self.zoom_lock = False
+        self.the_zoom_delta = 0
 
     def loadFirstPDF(self):
         self.showMaximized()
@@ -240,16 +250,56 @@ class PicturesWithHolesWidget(QWidget):
         self.pics.determine_render_ratio()
         
     def keyPressEvent(self, event):
+        if event.isAutoRepeat():
+            return
         if event.key() == QtCore.Qt.Key_Escape:
             self.stop()
-
+        elif event.key() == QtCore.Qt.Key_A:
+            print "Key A was pressed"
+            if self.zoom_lock:
+                return
+            self.zoom_lock = True
+            self.the_zoom_delta = 0.1
+            self.zoom_timer.start()
+        elif event.key() == QtCore.Qt.Key_Z:
+            print "Key Z was pressed"
+            if self.zoom_lock:
+                return
+            self.zoom_lock = True
+            self.the_zoom_delta = -0.1
+            self.zoom_timer.start()
+            
+    def keyReleaseEvent(self, event):
+        if event.isAutoRepeat():
+            return
+        if event.key() == QtCore.Qt.Key_A:
+            print "Key A was released"
+            if not (self.zoom_lock and self.the_zoom_delta > 0):
+                return
+            self.zoom_delta = 0
+            self.zoom_timer.stop()
+            self.zoom_lock = False
+        elif event.key() == QtCore.Qt.Key_Z:
+            print "Key Z was released"
+            if not (self.zoom_lock and self.the_zoom_delta < 0):
+                return
+            self.zoom_delta = 0
+            self.zoom_timer.stop()
+            self.zoom_lock = False
+            
     def wheelEvent(self, event):
+        self.zoom_to_cursor(0.1 * float(event.delta())/8/15/20)
+        
+    def zoom_to_cursor(self, delta_zoom=None):
+        if not delta_zoom:
+            delta_zoom = self.the_zoom_delta
+            
         pos = QCursor().pos()
         x_image = float(self.width() - self.the_qimage.width())/2
         y_image = float(self.height() - self.the_qimage.height())/2
         x_m = pos.x() - x_image
         y_m = pos.y() - y_image
-        zoom = (1.0 + 0.1 * float(event.delta())/8/15/20)
+        zoom = (1.0 + delta_zoom)
         ## print "Zoom:", zoom
         self.pics.recursive_rescale_and_sync(x_m, y_m,
                                              zoom = zoom,
