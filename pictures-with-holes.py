@@ -4,7 +4,7 @@ import sys
 from PyQt4.QtGui import (QPalette, QWidget, QApplication, QPainter, QColor, QCursor, QImage)
 from PyQt4 import QtCore
 from PyQt4 import Qt
-from PyQt4.QtCore import QRect, QRectF
+from PyQt4.QtCore import QRect, QRectF, QPointF
 
 from os import walk
 import os
@@ -22,6 +22,8 @@ FULL_HOLE_RATIO = 3
 
 # how much the image in the hole is smaller then the parent one
 HOLE_SCALE = 4
+
+MOVE_SPEED = 10
 
 def linear_transform(src, dst):
     zoom_x = float(dst.width())/src.width()
@@ -75,6 +77,7 @@ class PictureWithHole(object):
         # at first we assume we are rendering the whole of the page
         self.part = QRectF(0, 0,
                            self.image.width(), self.image.height())
+        self.whole_dest = None
         self.dest = None
         self.render_ratio = None
         
@@ -98,6 +101,10 @@ class PictureWithHole(object):
         h_half = float(self.child_pic.image.height()) / HOLE_SCALE / 2
 
         self.hole = QRectF(c.x() - w_half, c.y() - h_half, w_half * 2, h_half * 2)
+
+    def backpropagate_dest_and_part(self, image_rectf):
+        self.dest = self.whole_dest.intersected(image_rectf)
+        self.part = linear_transform(self.whole_dest, QRectF(self.image.rect()))(self.dest)
         
     def hole_visible_p(self):
         if self.render_ratio > MIN_HOLE_RATIO:
@@ -108,6 +115,7 @@ class PictureWithHole(object):
         parent_transform = linear_transform(self.part, self.dest)
         theor_dest = parent_transform(self.hole)
         expr_dest = parent_transform(self.hole.intersected(self.part))
+        self.child_pic.whole_dest = theor_dest
         self.child_pic.dest = expr_dest
         reverse_child_transform = linear_transform(theor_dest, QRectF(self.child_pic.image.rect()))
         self.child_pic.part = reverse_child_transform(expr_dest)
@@ -182,45 +190,42 @@ class PictureWithHole(object):
         return new_pic
 
     def determine_render_ratio(self):
-        ratio_x = float(self.dest.width())/self.part.width()
-        ratio_y = float(self.dest.height())/self.part.height()
+        if self.part.width() != 0:
+            ratio_x = float(self.dest.width())/self.part.width()
+        else:
+            ratio_x = 0
+        if self.part.height() != 0:
+            ratio_y = float(self.dest.height())/self.part.height()
+        else:
+            ratio_y = 0
         self.render_ratio = float(ratio_x + ratio_y)/2
-        # if abs(ratio_x - ratio_y) > 1:
-        #     print ratio_x, ratio_y
-        #     raise Exception("We don't support different ratios of PDFs right now")
-        # else:
-        #     self.render_ratio = ratio_x
 
     def recursive_rescale_and_sync(self, x_m, y_m, zoom=1.0, image=None):
         # we rescale destination
-        self.dest = QRectF(float(self.dest.x() - x_m) * zoom + x_m,
-                           float(self.dest.y() - y_m) * zoom + y_m,
-                           self.dest.width() * zoom,
-                           self.dest.height() * zoom)
-
+        self.whole_dest = QRectF(float(self.whole_dest.x() - x_m) * zoom + x_m,
+                                 float(self.whole_dest.y() - y_m) * zoom + y_m,
+                                 self.whole_dest.width() * zoom,
+                                 self.whole_dest.height() * zoom)
+        self.backpropagate_dest_and_part(QRectF(image.rect()))
         self.determine_render_ratio()
 
-        # we crop part and destination if they take more than qimage
-        if self.dest.x() < 0:
-            self.part.setLeft(self.part.x() - float(self.dest.x()) / self.render_ratio)
-            self.dest.setLeft(0)
-        if self.dest.y() < 0:
-            self.part.setTop(self.part.y() - float(self.dest.y()) / self.render_ratio)
-            self.dest.setTop(0)
-        if self.dest.right() > image.rect().right():
-            self.part.setRight(self.part.right()
-                               - float(self.dest.right()-image.rect().right())/self.render_ratio)
-            self.dest.setRight(image.rect().right())
-        if self.dest.bottom() > image.rect().bottom():
-            self.part.setBottom(self.part.bottom()
-                                - float(self.dest.bottom()-image.rect().bottom())/self.render_ratio)
-            self.dest.setBottom(image.rect().bottom())
-        
+        if self.render_ratio == 0:
+            return False
+
         # we sync and recurse on a child
         self.sync_child_pic()
         if self.child_pic:
-            self.child_pic.recursive_rescale_and_sync(x_m, y_m, zoom=zoom, image=image)
-        
+            if not self.child_pic.recursive_rescale_and_sync(x_m, y_m, zoom=zoom, image=image):
+                self.child_pic = None # if child scaled to zero, we delete it
+        return True
+
+    def recursive_move(self, dx, dy, image_rectf):
+        self.whole_dest.moveTo(self.whole_dest.topLeft() + QPointF(dx, dy))
+        self.backpropagate_dest_and_part(image_rectf)
+        self.sync_child_pic()
+        if self.child_pic:
+            self.child_pic.recursive_move(dx, dy, image_rectf)
+            
 class PicturesWithHolesWidget(QWidget):
     def __init__(self):
         super(PicturesWithHolesWidget, self).__init__(None)
@@ -238,15 +243,15 @@ class PicturesWithHolesWidget(QWidget):
         self.showMaximized()
         self.show()
         
-        self.init_zoom_on_key()
+        self.init_key_actions()
 
-    def init_zoom_on_key(self):
-        self.zoom_timer = QtCore.QTimer()
-        self.zoom_timer.setInterval(10)
-        self.zoom_timer.timeout.connect(self.zoom_to_cursor)
+    def init_key_actions(self):
+        self.action_timer = QtCore.QTimer()
+        self.action_timer.setInterval(10)
 
-        self.zoom_lock = False
-        self.the_zoom_delta = 0
+        self.action_lock = False
+        self.action_type = None
+        # self.the_zoom_delta = 0
 
     def loadFirstPDF(self):
         self.showMaximized()
@@ -271,7 +276,9 @@ class PicturesWithHolesWidget(QWidget):
         self.the_qimage = QImage(float(self.pics.image.width()) / ratio,
                                  float(self.pics.image.height()) / ratio,
                                  self.pics.image.format())
-        self.pics.dest = QRectF(self.the_qimage.rect())
+        the_qimage_rectf = QRectF(self.the_qimage.rect())
+        self.pics.whole_dest = the_qimage_rectf
+        self.pics.backpropagate_dest_and_part(the_qimage_rectf)
         self.pics.determine_render_ratio()
         
     def keyPressEvent(self, event):
@@ -281,36 +288,120 @@ class PicturesWithHolesWidget(QWidget):
             self.stop()
         elif event.key() == QtCore.Qt.Key_A:
             print "Key A was pressed"
-            if self.zoom_lock:
-                return
-            self.zoom_lock = True
-            self.the_zoom_delta = 0.1
-            self.zoom_timer.start()
+            self.try_start_action("zoom_in")
         elif event.key() == QtCore.Qt.Key_Z:
             print "Key Z was pressed"
-            if self.zoom_lock:
-                return
-            self.zoom_lock = True
-            self.the_zoom_delta = -0.1
-            self.zoom_timer.start()
+            self.try_start_action("zoom_out")
+        elif event.key() == QtCore.Qt.Key_J:
+            print "Key J was pressed"
+            self.try_start_action("move_left")
+        elif event.key() == QtCore.Qt.Key_L:
+            print "Key L was pressed"
+            self.try_start_action("move_right")
+        elif event.key() == QtCore.Qt.Key_I:
+            print "Key I was pressed"
+            self.try_start_action("move_up")
+        elif event.key() == QtCore.Qt.Key_K:
+            print "Key K was pressed"
+            self.try_start_action("move_down")
             
+    def try_start_action(self, name):
+        if self.action_type is not None:
+            return
+
+        self.action_type = name
+        res = getattr(self, name + "_starter")()
+        if res:
+            self.action_timer.start()
+
+    def zoom_in_starter(self):
+        self.the_zoom_delta = 0.1
+        self.action_timer.timeout.connect(self.zoom_to_cursor)
+        return True
+
+    def zoom_out_starter(self):
+        self.the_zoom_delta = -0.1
+        self.action_timer.timeout.connect(self.zoom_to_cursor)
+        return True
+
+    def try_stop_action(self, name):
+        if not(self.action_type and self.action_type == name):
+            return
+
+        res = getattr(self, name + "_stopper")()
+        if res:
+            self.action_timer.stop()
+        self.action_type = None
+
+    def zoom_in_stopper(self):
+        self.action_timer.timeout.disconnect(self.zoom_to_cursor)
+        return True
+
+    def zoom_out_stopper(self):
+        self.action_timer.timeout.disconnect(self.zoom_to_cursor)
+        return True
+
+    def move_left_starter(self):
+        self.the_move_x = MOVE_SPEED
+        self.the_move_y = 0
+        self.action_timer.timeout.connect(self.move)
+        return True
+    def move_right_starter(self):
+        self.the_move_x = -MOVE_SPEED
+        self.the_move_y = 0
+        self.action_timer.timeout.connect(self.move)
+        return True
+    def move_up_starter(self):
+        self.the_move_x = 0
+        self.the_move_y = MOVE_SPEED
+        self.action_timer.timeout.connect(self.move)
+        return True
+    def move_down_starter(self):
+        self.the_move_x = 0
+        self.the_move_y = -MOVE_SPEED
+        self.action_timer.timeout.connect(self.move)
+        return True
+    
+    def move_left_stopper(self):
+        self.action_timer.timeout.disconnect(self.move)
+        return True
+    def move_right_stopper(self):
+        self.action_timer.timeout.disconnect(self.move)
+        return True
+    def move_up_stopper(self):
+        self.action_timer.timeout.disconnect(self.move)
+        return True
+    def move_down_stopper(self):
+        self.action_timer.timeout.disconnect(self.move)
+        return True
+    
+    def move(self, x=None, y=None):
+        self.pics.recursive_move(x or self.the_move_x,
+                                 y or self.the_move_y,
+                                 QRectF(self.the_qimage.rect()))
+        self.redraw()
+    
     def keyReleaseEvent(self, event):
         if event.isAutoRepeat():
             return
         if event.key() == QtCore.Qt.Key_A:
             print "Key A was released"
-            if not (self.zoom_lock and self.the_zoom_delta > 0):
-                return
-            self.zoom_delta = 0
-            self.zoom_timer.stop()
-            self.zoom_lock = False
+            self.try_stop_action("zoom_in")
         elif event.key() == QtCore.Qt.Key_Z:
             print "Key Z was released"
-            if not (self.zoom_lock and self.the_zoom_delta < 0):
-                return
-            self.zoom_delta = 0
-            self.zoom_timer.stop()
-            self.zoom_lock = False
+            self.try_stop_action("zoom_out")
+        elif event.key() == QtCore.Qt.Key_J:
+            print "Key J was released"
+            self.try_stop_action("move_left")
+        elif event.key() == QtCore.Qt.Key_L:
+            print "Key L was released"
+            self.try_stop_action("move_right")
+        elif event.key() == QtCore.Qt.Key_I:
+            print "Key I was released"
+            self.try_stop_action("move_up")
+        elif event.key() == QtCore.Qt.Key_K:
+            print "Key K was released"
+            self.try_stop_action("move_down")
             
     def wheelEvent(self, event):
         self.zoom_to_cursor(0.1 * float(event.delta())/8/15/20)
@@ -338,6 +429,9 @@ class PicturesWithHolesWidget(QWidget):
             print "Switching to the child pic"
             self.pics = self.pics.child_pic
 
+        self.redraw()
+
+    def redraw(self):
         self.refresh_the_qimage()
         self.pics.recursive_draw(self.the_qimage)
         self.update()
