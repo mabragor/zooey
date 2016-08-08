@@ -65,9 +65,10 @@ def random_sketches_fname():
     return os.path.join(DRAFTS_SKETCHES_PATH, random.choice(ALL_SKETCHES))
 
 class Hole(object):
-    def __init__(self, hole, pic):
+    def __init__(self, hole, pic, parent_rectf):
         self.hole = hole
         self.pic = pic
+        self.parent_rectf = rectf
 
     def refine_coordinates(self):
         c = self.hole.center()
@@ -104,11 +105,13 @@ class PictureWithHoles(object):
         # we don't yet know, what is the actual size of the picture at hole will be
         # so we first work with the mean values -- and later we update
         hole_size = float(w + h) /HOLE_SCALE /2
+        rectf = QRectF(self.image.rect())
         self.children = [Hole(QRectF(random.random() * (w - hole_size),
                                      random.random() * (h - hole_size),
                                      hole_size,
                                      hole_size),
-                              None) for x in xrange(NUM_HOLES)]
+                              None,
+                              rectf) for x in xrange(NUM_HOLES)]
 
     def backpropagate_dest_and_part(self, image_rectf):
         self.dest = self.whole_dest.intersected(image_rectf)
@@ -138,43 +141,41 @@ class PictureWithHoles(object):
         else:
             child.pic = None
 
-    def recursive_draw(self, image, toplevel=True):
+    def recursive_draw(self, frame, scale):
+        # draw oneself
+        image = self.image.copy()
+
         painter = QPainter()
         painter.begin(image)
-        self.draw(painter, toplevel=toplevel)
-        painter.end()
         
+        # draw children that fit into frame
         for child in self.children:
             if child.pic is not None:
-                child.pic.recursive_draw(image, toplevel=False)
+                intersection = child.hole.intersected(frame)
+                if intersection.width() * intersection.height() > 0:
+                    child_scale = (scale
+                                   * (child.hole.width() + child.hole.height())
+                                   / (self.image.width() + self.image.height()))
+                    intersection_src = linear_transform(child.hole, QRectF(child.pic.image.rect()))(intersection)
+                    child_image = child.pic.recursive_draw(intersection_src)
+                        
+                    painter.setOpacity(1.0)
+                    painter.fillRect(intersection, QtCore.Qt.white)
+                    painter.setPen(QtCore.Qt.black)
+                    painter.drawRect(intersection)
+                    
+                    painter.setOpacity(parent_opacity(child_scale)) # ??? what should be here ??? self.render_ratio))
+                    painter.drawImage(intersection,
+                                      self.image,
+                                      intersection)
 
-    def draw(self, painter, toplevel=True):
-        if toplevel:
-            painter.setOpacity(1.0)
-        else:
-            painter.setOpacity(child_opacity(self.render_ratio))
-        ## print "Painter opacity:", painter.opacity(), self.render_ratio
-        painter.drawImage(self.dest.toAlignedRect(), self.image, self.part.toAlignedRect())
-
-        # mark, where the hole is
-        ## print "Hole:", self.hole, linear_transform(self.part, self.dest)(self.hole)
-        oldOpacity = painter.opacity()
-        painter.setPen(QtCore.Qt.black)
-        for child in self.children:
-            painter.drawRect(linear_transform(self.part, self.dest)(child.hole))
-        painter.setOpacity(oldOpacity)
-
-        srcs = filter(lambda x: x, map(lambda x: self.hole_visible_p(x), self.children))
-        transform = linear_transform(self.part, self.dest)
-        dsts = map(transform, srcs)
-        
-        painter.setOpacity(1.0)
-        for dst in dsts:
-            painter.fillRect(dst, QtCore.Qt.white)
-            
-        painter.setOpacity(parent_opacity(self.render_ratio))
-        for (src, dst) in zip(srcs, dsts):
-            painter.drawImage(dst.toAlignedRect(), self.image, src.toAlignedRect())
+                    child_image.setAlphaChannel(child_image.createMaskFromColor(QtCore.Qt.white, 1))
+                    painter.setOpacity(child_opacity(child_scale))
+                    painter.drawImage(intersection, child_image, intersection_src)
+                    
+        painter.end()
+                        
+        return image
 
     def hole_takes_whole_qimage(self, child):
         return child.hole.contains(self.part)
