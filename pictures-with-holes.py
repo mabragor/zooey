@@ -174,20 +174,26 @@ class PictureWithHole(object):
         # print "In takes_whole_qimage:", self.dest, image_rect
         return self.dest.contains(image_rect)
 
-    def glue_on_top(self, new_pic, image):
+    def glue_on_top(self, new_pic, image_rectf):
         new_pic.child_pic = self
-        new_pic.dest = QRectF(image.rect())
+        new_pic.dest = image_rectf
+        new_pic.refine_hole_coordinates()
 
-        # determine coordinates of the visible part of the hole in its parent coord system
-        top = new_pic.hole.top() + 1.0/HOLE_SCALE * self.part.top()
-        bottom = new_pic.hole.top() + 1.0/HOLE_SCALE * self.part.bottom()
-        left = new_pic.hole.left() + 1.0/HOLE_SCALE * self.part.left()
-        right = new_pic.hole.left() + 1.0/HOLE_SCALE * self.part.right()
+        new_pic.whole_dest = linear_transform(new_pic.hole, self.whole_dest)(QRectF(new_pic.image.rect()))
+        new_pic.backpropagate_dest_and_part(image_rectf)
 
-        new_pic.part = linear_transform(self.dest, QRectF(left, top, right-left, bottom-top))(self.dest)
-        
-        new_pic.determine_render_ratio()
         return new_pic
+        
+        # # determine coordinates of the visible part of the hole in its parent coord system
+        # top = new_pic.hole.top() + 1.0/HOLE_SCALE * self.part.top()
+        # bottom = new_pic.hole.top() + 1.0/HOLE_SCALE * self.part.bottom()
+        # left = new_pic.hole.left() + 1.0/HOLE_SCALE * self.part.left()
+        # right = new_pic.hole.left() + 1.0/HOLE_SCALE * self.part.right()
+
+        # new_pic.part = linear_transform(self.dest, QRectF(left, top, right-left, bottom-top))(self.dest)
+        
+        # new_pic.determine_render_ratio()
+        # return new_pic
 
     def determine_render_ratio(self):
         if self.part.width() != 0:
@@ -252,6 +258,14 @@ class PicturesWithHolesWidget(QWidget):
         self.action_lock = False
         self.action_type = None
         # self.the_zoom_delta = 0
+
+    def num_active_pics(self):
+        num_active_pics = 0
+        cur_pic = self.pics
+        while cur_pic is not None:
+            num_active_pics += 1
+            cur_pic = cur_pic.child_pic
+        return num_active_pics
 
     def loadFirstPDF(self):
         self.showMaximized()
@@ -385,10 +399,10 @@ class PicturesWithHolesWidget(QWidget):
         if event.isAutoRepeat():
             return
         if event.key() == QtCore.Qt.Key_A:
-            print "Key A was released"
+            print "Key A was released, # active pics:", self.num_active_pics()
             self.try_stop_action("zoom_in")
         elif event.key() == QtCore.Qt.Key_Z:
-            print "Key Z was released"
+            print "Key Z was released, # active pics:", self.num_active_pics()
             self.try_stop_action("zoom_out")
         elif event.key() == QtCore.Qt.Key_J:
             print "Key J was released"
@@ -423,7 +437,7 @@ class PicturesWithHolesWidget(QWidget):
         if not self.pics.takes_whole_qimage(self.the_qimage):
             print "Creating new top pic"
             self.pics = self.pics.glue_on_top(PictureWithHole(random_sketches_fname()),
-                                              self.the_qimage)
+                                              QRectF(self.the_qimage.rect()))
 
         if self.pics.hole_takes_whole_qimage():
             print "Switching to the child pic"
