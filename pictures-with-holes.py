@@ -20,6 +20,9 @@ THE_Y = 0
 MIN_HOLE_RATIO = 2
 FULL_HOLE_RATIO = 3
 
+# how much the image in the hole is smaller then the parent one
+HOLE_SCALE = 4
+
 def linear_transform(src, dst):
     zoom_x = float(dst.width())/src.width()
     zoom_y = float(dst.height())/src.height()
@@ -33,7 +36,7 @@ def linear_transform(src, dst):
 
 
 def child_opacity(ratio):
-    return min(float(4 * ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
+    return min(float(HOLE_SCALE * ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
                1.0)
 
 def parent_opacity(ratio):
@@ -81,18 +84,40 @@ class PictureWithHole(object):
     def init_hole_coordinates(self):
         w = self.image.width()
         h = self.image.height()
-        self.hole = QRectF(random.random() * 3/4 * w, random.random() * 3/4 * h, 1.0/4 * w, 1.0/4 * h)
+        # we don't yet know, what is the actual size of the picture at hole will be
+        # so we first work with the mean values -- and later we update
+        hole_size = float(w + h) /HOLE_SCALE /2
+        self.hole = QRectF(random.random() * (w - hole_size),
+                           random.random() * (h - hole_size),
+                           hole_size,
+                           hole_size)
 
+    def refine_hole_coordinates(self):
+        c = self.hole.center()
+        w_half = float(self.child_pic.image.width()) / HOLE_SCALE / 2
+        h_half = float(self.child_pic.image.height()) / HOLE_SCALE / 2
+
+        self.hole = QRectF(c.x() - w_half, c.y() - h_half, w_half * 2, h_half * 2)
+        
     def hole_visible_p(self):
         if self.render_ratio > MIN_HOLE_RATIO:
             return self.hole.intersected(self.part)
         return None
 
+    def refine_childs_dest_and_part(self):
+        parent_transform = linear_transform(self.part, self.dest)
+        theor_dest = parent_transform(self.hole)
+        expr_dest = parent_transform(self.hole.intersected(self.part))
+        self.child_pic.dest = expr_dest
+        reverse_child_transform = linear_transform(theor_dest, QRectF(self.child_pic.image.rect()))
+        self.child_pic.part = reverse_child_transform(expr_dest)
+    
     def sync_child_pic(self):
         if self.hole_visible_p():
             if self.child_pic is None:
                 self.child_pic = PictureWithHole(random_sketches_fname())
-                self.child_pic.dest = linear_transform(self.part, self.dest)(self.hole.intersected(self.part))
+                self.refine_hole_coordinates()
+                self.refine_childs_dest_and_part()
                 self.child_pic.determine_render_ratio()
         else:
             self.child_pic = None    
@@ -146,10 +171,10 @@ class PictureWithHole(object):
         new_pic.dest = QRectF(image.rect())
 
         # determine coordinates of the visible part of the hole in its parent coord system
-        top = new_pic.hole.top() + 1.0/4 * self.part.top()
-        bottom = new_pic.hole.top() + 1.0/4 * self.part.bottom()
-        left = new_pic.hole.left() + 1.0/4 * self.part.left()
-        right = new_pic.hole.left() + 1.0/4 * self.part.right()
+        top = new_pic.hole.top() + 1.0/HOLE_SCALE * self.part.top()
+        bottom = new_pic.hole.top() + 1.0/HOLE_SCALE * self.part.bottom()
+        left = new_pic.hole.left() + 1.0/HOLE_SCALE * self.part.left()
+        right = new_pic.hole.left() + 1.0/HOLE_SCALE * self.part.right()
 
         new_pic.part = linear_transform(self.dest, QRectF(left, top, right-left, bottom-top))(self.dest)
         
