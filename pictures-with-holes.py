@@ -65,10 +65,21 @@ def random_sketches_fname():
     return os.path.join(DRAFTS_SKETCHES_PATH, random.choice(ALL_SKETCHES))
 
 class Hole(object):
-    def __init__(self, hole, pic, parent_rectf):
-        self.hole = hole
-        self.pic = pic
+    def __init__(self, parent_rectf, pic=None, hole=None):
         self.parent_rectf = parent_rectf
+        self.pic = pic
+
+        if hole is None:
+            w = self.parent_rectf.width()
+            h = self.parent_rectf.height()
+            hole_size = float(w + h) /DEFAULT_HOLE_SCALE /2
+            self.hole = QRectF(random.random() * (w - hole_size),
+                               random.random() * (h - hole_size),
+                               hole_size,
+                               hole_size)
+        else:
+            self.hole = hole
+
         if self.pic is not None:
             self.refine_coordinates()
         else:
@@ -96,17 +107,12 @@ class Hole(object):
         return None
 
     def rescale(self, x_m, y_m, zoom=1.0):
-        self.parent_rectf = QRectF(float(self.parent_rectf.x() - x_m) * zoom + x_m,
-                                   float(self.parent_rectf.y() - y_m) * zoom + y_m,
-                                   self.parent_rectf.width() * zoom,
-                                   self.parent_rectf.height() * zoom)
         self.hole = QRectF(float(self.hole.x() - x_m) * zoom + x_m,
                            float(self.hole.y() - y_m) * zoom + y_m,
                            self.hole.width() * zoom,
                            self.hole.height() * zoom)
         
     def move(self, dx, dy):
-        self.parent_rectf.moveTo(self.parent_rectf.topLeft() + QPointF(dx, dy))
         self.hole.moveTo(self.hole.topLeft() + QPointF(dx, dy))
         
     def sync(self, frame, ratio):
@@ -126,39 +132,46 @@ class Hole(object):
             self.pic.recursive_sync(linear_transform(self.hole, self.child_rectf)(it),
                                     float(ratio) / self.hole_ratio)
 
-    def takes_whole_frame(self, frame):
-        image_rect = QRectF(frame) # we need our own copy here
+    def takes_whole_frame(self):
+        image_rect = QRectF(self.parent_rectf) # we need our own copy here
         MARGIN = 5
         image_rect.setLeft(image_rect.left() + MARGIN)
         image_rect.setTop(image_rect.top() + MARGIN)
         image_rect.setRight(image_rect.right() - MARGIN)
         image_rect.setBottom(image_rect.bottom() - MARGIN)
         # print "In takes_whole_qimage:", self.dest, image_rect
-        return self.parent_rectf.contains(image_rect)
+        return self.hole.contains(image_rect)
 
-    def glue_on_top(self, new_pic, frame):
+    def glue_on_top(self, new_pic):
         index = random.randint(0, NUM_HOLES - 1)
+        new_place = new_pic.children[index]
 
-        # create new hole
-        hole = Hole(None,
-                    new_pic,
-                    
-        # attach everything in the right way
-        # adjust former top-level hole parameters
-        # set new top-level hole parameters
+        new_place.pic = self.pic
+        new_place.refine_coordinates()
+
+        return Hole(self.parent_rectf,
+                    pic = new_pic,
+                    hole = linear_transform(new_place.hole, self.hole)(new_place.parent_rectf))
+
+    def some_last_hole_takes_whole_frame(self):
+        index = len(self.children)
+        for child in reversed(self.pic.children):
+            index -= 1
+            hole_in_abs_coords = linear_transform(child.parent_rectf, self.hole)(child.hole)
+
+            if hole_in_abs_coords.contains(self.parent_rectf):
+                return index
+        return None
+
+    def switch_to_child_pic(index):
+        the_child = self.pic.children[index] # OK, I know, this isn't stricly OOP
+
+        new_hole = Hole(self.parent_rectf, # frame stays the same
+                        pic = the_child.pic
+                        hole = linear_transform(the_child.parent_rectf, self.hole)(the_child.hole))
         
-        new_pic.children[index].pic = self
-        new_pic.dest = image_rectf
-        new_pic.children[index].refine_coordinates()
-
-        new_pic.whole_dest = linear_transform(new_pic.children[index].hole,
-                                              self.whole_dest)(QRectF(new_pic.image.rect()))
-        new_pic.backpropagate_dest_and_part(image_rectf)
-        new_pic.determine_render_ratio()
-
-        return new_pic
-            
-            
+        return the_child
+    
 class PictureWithHoles(object):
     def __init__(self, fname):
         self.load(fname)
@@ -186,12 +199,9 @@ class PictureWithHoles(object):
         h = self.image.height()
         # we don't yet know, what is the actual size of the picture at hole will be
         # so we first work with the mean values -- and later we update
-        hole_size = float(w + h) /HOLE_SCALE /2
+                    hole_size = float(w + h) /HOLE_SCALE /2
         rectf = QRectF(self.image.rect())
-        self.children = [Hole(QRectF(random.random() * (w - hole_size),
-                                     random.random() * (h - hole_size),
-                                     hole_size,
-                                     hole_size),
+        self.children = [Hole(
                               None,
                               rectf) for x in xrange(NUM_HOLES)]
 
@@ -243,17 +253,6 @@ class PictureWithHoles(object):
         painter.end()
                         
         return image
-
-    def hole_takes_whole_qimage(self, child):
-        return child.hole.contains(self.part)
-
-    def some_last_hole_takes_whole_qimage(self):
-        index = len(self.children)
-        for child in reversed(self.children):
-            index -= 1
-            if self.hole_takes_whole_qimage(child):
-                return index
-        return None
 
     def one_hole_takes_whole_qimage(self):
         num_visible = 0
@@ -502,13 +501,12 @@ class PicturesWithHolesWidget(QWidget):
         
         if not self.pics.takes_whole_frame(self.frame):
             print "Creating new top pic"
-            self.pics = self.pics.glue_on_top(PictureWithHoles(random_sketches_fname()),
-                                              frame)
+            self.pics = self.pics.glue_on_top(PictureWithHoles(random_sketches_fname()))
 
-        dominant_index = self.pics.some_last_hole_takes_whole_qimage()
+        dominant_index = self.pics.some_last_hole_takes_whole_frame()
         if dominant_index is not None: # self.pics.hole_takes_whole_qimage():
             print "Switching to the child pic"
-            self.pics = self.pics.children[dominant_index].pic
+            self.pics = self.pics.switch_to_child_pic(dominant_index)
 
         self.redraw()
 
