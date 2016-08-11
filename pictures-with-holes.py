@@ -18,7 +18,7 @@ THE_X = 0
 THE_Y = 0
 
 MAX_HOLE_DISTANCE = 2.0
-FULL_HOLE_RATIO = 1.1
+FULL_HOLE_DISTANCE = 1.1
 
 # how much the image in the hole is smaller then the parent one
 DEFAULT_HOLE_SCALE = 4
@@ -39,15 +39,15 @@ def linear_transform(src, dst):
 
 
 
-def child_opacity(ratio):
-    return 1.0
-    # return min(float(ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
-    #            1.0)
+def child_opacity(distance):
+    # return 1.0
+    return min(float(MAX_HOLE_DISTANCE - distance)/(MAX_HOLE_DISTANCE - FULL_HOLE_DISTANCE),
+               1.0)
 
-def parent_opacity(ratio):
-    return 1.0
-    # return max(1.0 - float(ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
-    #            0.0)
+def parent_opacity(distance):
+    # return 1.0
+    return max(1.0 - float(MAX_HOLE_DISTANCE - distance)/(MAX_HOLE_DISTANCE - FULL_HOLE_DISTANCE),
+               0.0)
 
 DRAFTS_SKETCHES_PATH = "/home/popolit/drafts/sketches"
 ALL_SKETCHES = None
@@ -244,11 +244,14 @@ class Hole(object):
         painter.drawRect(linear_transform(src_rectf, dest_rectf)(self.hole).toAlignedRect())
         painter.end()
     
-    def recursive_draw(self, target_image, dest_rectf=None, src_rectf=None):
+    def recursive_draw(self, target_image, dest_rectf=None, src_rectf=None, distance=None):
         if dest_rectf is None:
             dest_rectf = self.parent_rectf
             src_rectf = self.parent_rectf
-        
+            distance = 1.0
+            
+        distance *= self.hole_scale()
+            
         if self.pic is not None:
             # we need to calculate where to draw a hole,
             # and we are given, where to draw the whole thing
@@ -256,7 +259,10 @@ class Hole(object):
             if intersection.width() * intersection.height() > 0:
                 intersection_src = linear_transform(self.hole, self.child_rectf)(intersection)
                 intersection_dst = linear_transform(src_rectf, dest_rectf)(intersection)
-                self.pic.recursive_draw(target_image, intersection_dst, intersection_src)
+                self.pic.recursive_draw(target_image,
+                                        dest_rectf = intersection_dst,
+                                        src_rectf = intersection_src,
+                                        distance = distance)
 
         # the reason we draw it here is that we want to draw it
         # even when there's no picture in the hole yet
@@ -289,13 +295,33 @@ class PictureWithHoles(object):
         rectf = QRectF(self.image.rect())
         self.children = [Hole(rectf) for x in xrange(NUM_HOLES)]
 
-    def recursive_draw(self, target_image, dest_rectf, src_rectf):
-        # # draw oneself
-        # image = self.image.copy()
+    def draw(self, target_image, dest_rectf, src_rectf, distance):
+        # draw oneself
+        painter = QPainter()
+        painter.begin(target_image)
+        parent_image = target_image.copy(dest_rectf.toAlignedRect())
+        # we fill it white, with black border
+        painter.setOpacity(1.0)
+        painter.fillRect(dest_rectf, QtCore.Qt.white)
+
+        # we redraw it parent-transparent
+        painter.setOpacity(parent_opacity(distance))
+        painter.drawImage(dest_rectf, parent_image)
+        
+        # we draw our image child-transparent on top of it
+        sub_image = self.image.copy(src_rectf.toAlignedRect())
+        sub_image.setAlphaChannel(sub_image.createMaskFromColor(QtCore.Qt.white, 1))
+        painter.setOpacity(child_opacity(distance))
+        painter.drawImage(dest_rectf, sub_image)
+
+        painter.end()
+        
+    def recursive_draw(self, target_image, dest_rectf, src_rectf, distance):
+        self.draw(target_image, dest_rectf, src_rectf, distance)
 
         # draw all children (they know if they should draw themselves or not)
         for child in self.children:
-            child.recursive_draw(target_image, dest_rectf, src_rectf)
+            child.recursive_draw(target_image, dest_rectf, src_rectf, distance)
 
     def recursive_sync(self, level, frame, ratio):
         for child in self.children:
