@@ -17,8 +17,8 @@ PDF_BASE_RESOLUTION = 72.0
 THE_X = 0
 THE_Y = 0
 
-MIN_HOLE_RATIO = 2
-FULL_HOLE_RATIO = 3
+MIN_HOLE_DISTANCE = 2.0
+FULL_HOLE_RATIO = 1.5
 
 # how much the image in the hole is smaller then the parent one
 DEFAULT_HOLE_SCALE = 4
@@ -40,12 +40,14 @@ def linear_transform(src, dst):
 
 
 def child_opacity(ratio):
-    return min(float(HOLE_SCALE * ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
-               1.0)
+    return 1.0
+    # return min(float(ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
+    #            1.0)
 
 def parent_opacity(ratio):
-    return max(1.0 - float(ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
-               0.0)
+    return 1.0
+    # return max(1.0 - float(ratio - MIN_HOLE_RATIO)/(FULL_HOLE_RATIO - MIN_HOLE_RATIO),
+    #            0.0)
 
 DRAFTS_SKETCHES_PATH = "/home/popolit/drafts/sketches"
 ALL_SKETCHES = None
@@ -68,7 +70,12 @@ class Hole(object):
     def __init__(self, parent_rectf, pic=None, hole=None):
         self.parent_rectf = parent_rectf
         self.pic = pic
+        self.hole = None
+        self.child_rectf = None
 
+        if self.parent_rectf is None:
+            return
+        
         if hole is None:
             w = self.parent_rectf.width()
             h = self.parent_rectf.height()
@@ -85,6 +92,9 @@ class Hole(object):
         else:
             self.child_rectf = None
 
+    def croak(self):
+        print "parent_rectf:", self.parent_rectf, "hole:", self.hole, "child_rectf:", self.child_rectf
+            
     def hole_scale(self):
         if self.hole is None:
             return DEFAULT_HOLE_SCALE
@@ -96,13 +106,14 @@ class Hole(object):
         c = self.hole.center()
         self.child_rectf = QRectF(self.pic.image.rect())
         scale = self.hole_scale()
-        w_half = float(self.child_rectf.width()) / scale / 2
-        h_half = float(self.child_rectf.height()) / scale / 2
+        print "Hole scale:", scale
+        w_half = float(self.parent_rectf.width()) / scale / 2
+        h_half = float(self.parent_rectf.height()) / scale / 2
 
         self.hole = QRectF(c.x() - w_half, c.y() - h_half, w_half * 2, h_half * 2)
         
-    def visible_p(self, frame, ratio):
-        if ratio > MIN_HOLE_RATIO:
+    def visible_p(self, frame, distance):
+        if distance < MIN_HOLE_DISTANCE:
             return self.hole.intersected(frame)
         return None
 
@@ -118,19 +129,25 @@ class Hole(object):
     def sync(self, frame, ratio):
         it = self.visible_p(frame, ratio)
         if it is None:
+            print "Hole invisible -- removing pic:", ratio
             self.pic = None
-            return
+            return None
         else:
             if self.pic is None:
                 self.pic = PictureWithHoles(random_sketches_fname())
                 self.refine_coordinates()
+            return it
         
-    def recursive_sync(self, frame, ratio):
-        self.sync()
+    def recursive_sync(self, frame=None, distance=None):
+        if frame is None:
+            frame = self.parent_rectf
+            distance = self.hole_scale()
+            
+        it = self.sync(frame, distance)
         
-        if self.pic is not None:
+        if (it is not None) and (self.pic is not None):
             self.pic.recursive_sync(linear_transform(self.hole, self.child_rectf)(it),
-                                    float(ratio) / self.hole_ratio)
+                                    float(distance) / self.hole_scale())
 
     def takes_whole_frame(self):
         image_rect = QRectF(self.parent_rectf) # we need our own copy here
@@ -154,7 +171,7 @@ class Hole(object):
                     hole = linear_transform(new_place.hole, self.hole)(new_place.parent_rectf))
 
     def some_last_hole_takes_whole_frame(self):
-        index = len(self.children)
+        index = len(self.pic.children)
         for child in reversed(self.pic.children):
             index -= 1
             hole_in_abs_coords = linear_transform(child.parent_rectf, self.hole)(child.hole)
@@ -167,10 +184,50 @@ class Hole(object):
         the_child = self.pic.children[index] # OK, I know, this isn't stricly OOP
 
         new_hole = Hole(self.parent_rectf, # frame stays the same
-                        pic = the_child.pic
+                        pic = the_child.pic,
                         hole = linear_transform(the_child.parent_rectf, self.hole)(the_child.hole))
         
-        return the_child
+        return new_hole
+
+    def recursive_active_pics(self):
+        if self.pic is None:
+            return 0
+        return self.pic.recursive_active_pics()
+
+    def recursive_draw(self, image, frame=None, distance=None):
+        if self.pic is None:
+            return # we just do nothing
+        
+        if frame is None: # it means we are at the toplevel
+            frame = self.parent_rectf
+            distance = 1.0
+
+        intersection = self.hole.intersected(frame)
+        intersection_src = linear_transform(self.hole, self.child_rectf)(intersection)
+            
+        sub_image = self.pic.recursive_draw(intersection_src,
+                                            distance = distance * self.hole_scale())
+        painter = QPainter()
+        painter.begin(image)
+
+        # we copy a hole region from image
+        hole_parent_image = image.copy(intersection.toAlignedRect())
+        # we fill it white, with black border
+        painter.setOpacity(1.0)
+        painter.fillRect(intersection, QtCore.Qt.white)
+        painter.setPen(QtCore.Qt.black)
+        painter.drawRect(intersection)
+
+        # we redraw it parent-transparent
+        painter.setOpacity(parent_opacity(distance))
+        painter.drawImage(intersection, hole_parent_image)
+        
+        # we draw child-transparent subimage on top of it
+        sub_image.setAlphaChannel(sub_image.createMaskFromColor(QtCore.Qt.white, 1))
+        painter.setOpacity(child_opacity(distance))
+        painter.drawImage(intersection, sub_image, intersection_src)
+
+        painter.end()
     
 class PictureWithHoles(object):
     def __init__(self, fname):
@@ -195,91 +252,18 @@ class PictureWithHoles(object):
         ## print "Loaded:", fname, self.hole.x(), self.hole.y(), self.hole.width(), self.hole.height()
 
     def init_children(self):
-        w = self.image.width()
-        h = self.image.height()
-        # we don't yet know, what is the actual size of the picture at hole will be
-        # so we first work with the mean values -- and later we update
-                    hole_size = float(w + h) /HOLE_SCALE /2
         rectf = QRectF(self.image.rect())
-        self.children = [Hole(
-                              None,
-                              rectf) for x in xrange(NUM_HOLES)]
+        self.children = [Hole(rectf) for x in xrange(NUM_HOLES)]
 
-    def backpropagate_dest_and_part(self, image_rectf):
-        self.dest = self.whole_dest.intersected(image_rectf)
-        self.part = linear_transform(self.whole_dest, QRectF(self.image.rect()))(self.dest)
-        
-    def refine_childs_dest_and_part(self, child):
-        parent_transform = linear_transform(self.part, self.dest)
-        theor_dest = parent_transform(child.hole)
-        expr_dest = parent_transform(child.hole.intersected(self.part))
-        child.pic.whole_dest = theor_dest
-        child.pic.dest = expr_dest
-        reverse_child_transform = linear_transform(theor_dest, QRectF(child.pic.image.rect()))
-        child.pic.part = reverse_child_transform(expr_dest)
-    
-    def recursive_draw(self, frame, scale):
+    def recursive_draw(self, frame, distance):
         # draw oneself
         image = self.image.copy()
 
-        painter = QPainter()
-        painter.begin(image)
-        
-        # draw children that fit into frame
+        # draw all children (they know if they should draw themselves or not)
         for child in self.children:
-            if child.pic is not None:
-                intersection = child.hole.intersected(frame)
-                if intersection.width() * intersection.height() > 0:
-                    child_scale = (scale
-                                   * (child.hole.width() + child.hole.height())
-                                   / (self.image.width() + self.image.height()))
-                    intersection_src = linear_transform(child.hole, QRectF(child.pic.image.rect()))(intersection)
-                    child_image = child.pic.recursive_draw(intersection_src)
-                        
-                    painter.setOpacity(1.0)
-                    painter.fillRect(intersection, QtCore.Qt.white)
-                    painter.setPen(QtCore.Qt.black)
-                    painter.drawRect(intersection)
-                    
-                    painter.setOpacity(parent_opacity(child_scale)) # ??? what should be here ??? self.render_ratio))
-                    painter.drawImage(intersection,
-                                      self.image,
-                                      intersection)
-
-                    child_image.setAlphaChannel(child_image.createMaskFromColor(QtCore.Qt.white, 1))
-                    painter.setOpacity(child_opacity(child_scale))
-                    painter.drawImage(intersection, child_image, intersection_src)
-                    
-        painter.end()
+            child.recursive_draw(image, frame, distance)
                         
         return image
-
-    def one_hole_takes_whole_qimage(self):
-        num_visible = 0
-        index = -1
-        full_indices = []
-        for child in self.children:
-            index += 1
-            if self.hole_visible_p(child):
-                num_visible += 1
-            if self.hole_takes_whole_qimage(child):
-                full_indices.append(index)
-            if num_visible == 2:
-                return None
-        if len(full_indices) == 1 and num_visible == 1:
-            return full_indices[0]
-        return None
-    
-    def determine_render_ratio(self):
-        if self.part.width() != 0:
-            ratio_x = float(self.dest.width())/self.part.width()
-        else:
-            ratio_x = 0
-        if self.part.height() != 0:
-            ratio_y = float(self.dest.height())/self.part.height()
-        else:
-            ratio_y = 0
-        self.render_ratio = float(ratio_x + ratio_y)/2
 
     def recursive_sync(self, frame, ratio):
         for child in self.children:
@@ -288,8 +272,7 @@ class PictureWithHoles(object):
     def recursive_active_pics(self):
         num_pics = 1
         for child in self.children:
-            if child.pic is not None:
-                num_pics += child.pic.recursive_active_pics()
+            num_pics += child.recursive_active_pics()
         return num_pics
                 
 class PicturesWithHolesWidget(QWidget):
@@ -325,17 +308,12 @@ class PicturesWithHolesWidget(QWidget):
     def loadFirstPDF(self):
         self.showMaximized()
         self.hide()
-        self.pics = Hole(None,
-                         PictureWithHoles(random_sketches_fname()),
-                         None)
+        self.pics = Hole(None, pic=PictureWithHoles(random_sketches_fname()))
         
         self.init_pdf_image_geometry()
 
         ## print self.pics.part, self.pics.dest, self.width(), self.height()
-        
-        self.refresh_the_qimage() # color=QtCore.Qt.transparent)
-        self.pics.recursive_draw(self.the_qimage)
-        self.update()
+        self.redraw()
         
     def init_pdf_image_geometry(self):
         my_height = self.height()
@@ -348,12 +326,12 @@ class PicturesWithHolesWidget(QWidget):
                                  float(self.pics.pic.image.height()) / ratio,
                                  self.pics.pic.image.format())
         the_qimage_rectf = QRectF(self.the_qimage.rect())
-        self.pics.parent_rectf = the_qimage_rectf # now it's the property of our widget
-        self.pics.hole = the_qimage_rectf
-        
-        # we determine transforms as we go
-        # self.pics.backpropagate_dest_and_part(the_qimage_rectf)
-        # self.pics.determine_render_ratio()
+        self.pics.parent_rectf = QRectF(the_qimage_rectf) # we need these two widgets to be different
+        self.pics.hole = QRectF(the_qimage_rectf)
+        self.pics.refine_coordinates()
+        # self.pics.child_rectf = QRectF(self.pics.pic.image.rect())
+
+        self.pics.croak()
         
     def keyPressEvent(self, event):
         if event.isAutoRepeat():
@@ -361,22 +339,22 @@ class PicturesWithHolesWidget(QWidget):
         if event.key() == QtCore.Qt.Key_Escape:
             self.stop()
         elif event.key() == QtCore.Qt.Key_A:
-            print "Key A was pressed"
+            print "Key A was pressed, # active pics:", self.num_active_pics()
             self.try_start_action("zoom_in")
         elif event.key() == QtCore.Qt.Key_Z:
-            print "Key Z was pressed"
+            print "Key Z was pressed, # active pics:", self.num_active_pics()
             self.try_start_action("zoom_out")
         elif event.key() == QtCore.Qt.Key_J:
-            print "Key J was pressed"
+            print "Key J was pressed, # active pics:", self.num_active_pics()
             self.try_start_action("move_left")
         elif event.key() == QtCore.Qt.Key_L:
-            print "Key L was pressed"
+            print "Key L was pressed, # active pics:", self.num_active_pics()
             self.try_start_action("move_right")
         elif event.key() == QtCore.Qt.Key_I:
-            print "Key I was pressed"
+            print "Key I was pressed, # active pics:", self.num_active_pics()
             self.try_start_action("move_up")
         elif event.key() == QtCore.Qt.Key_K:
-            print "Key K was pressed"
+            print "Key K was pressed, # active pics:", self.num_active_pics()
             self.try_start_action("move_down")
             
     def try_start_action(self, name):
@@ -450,9 +428,9 @@ class PicturesWithHolesWidget(QWidget):
         return True
     
     def move(self, x=None, y=None):
-        self.pics.recursive_move(x or self.the_move_x,
-                                 y or self.the_move_y,
-                                 QRectF(self.the_qimage.rect()))
+        self.pics.move(x or self.the_move_x,
+                       y or self.the_move_y)
+        self.pics.recursive_sync()
         self.redraw()
     
     def keyReleaseEvent(self, event):
@@ -465,16 +443,16 @@ class PicturesWithHolesWidget(QWidget):
             print "Key Z was released, # active pics:", self.num_active_pics()
             self.try_stop_action("zoom_out")
         elif event.key() == QtCore.Qt.Key_J:
-            print "Key J was released"
+            print "Key J was released, # active pics:", self.num_active_pics()
             self.try_stop_action("move_left")
         elif event.key() == QtCore.Qt.Key_L:
-            print "Key L was released"
+            print "Key L was released, # active pics:", self.num_active_pics()
             self.try_stop_action("move_right")
         elif event.key() == QtCore.Qt.Key_I:
-            print "Key I was released"
+            print "Key I was released, # active pics:", self.num_active_pics()
             self.try_stop_action("move_up")
         elif event.key() == QtCore.Qt.Key_K:
-            print "Key K was released"
+            print "Key K was released, # active pics:", self.num_active_pics()
             self.try_stop_action("move_down")
             
     def wheelEvent(self, event):
@@ -499,7 +477,7 @@ class PicturesWithHolesWidget(QWidget):
                                  ((self.pics.parent_rectf.width() + self.pics.parent_rectf.height())
                                   / (frame.width() + frame.height())))
         
-        if not self.pics.takes_whole_frame(self.frame):
+        if not self.pics.takes_whole_frame():
             print "Creating new top pic"
             self.pics = self.pics.glue_on_top(PictureWithHoles(random_sketches_fname()))
 
