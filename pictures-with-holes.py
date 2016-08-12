@@ -363,22 +363,22 @@ class PicturesWithHolesWidget(QWidget):
                          "i" : ["move", "up"],
                          "j" : ["move", "left"],
                          "k" : ["move", "down"],
-                         "l" : ["move", "right"] },
-              #            "shift" : ["mode", "shift"],
-              #            "e" : ["mode", "volder_edit"] },
-              # "shift" : { "options" : ["inherit"],
-              #             "i" : ["move_cursor", "up"],
-              #             "j" : ["move_cursor", "left"],
-              #             "k" : ["move_cursor", "down"],
-              #             "l" : ["move_cursor", "right"] },
+                         "l" : ["move", "right"],
+                         "shift" : ["mode", "shift"] },
+                         # "e" : ["mode", "volder_edit"] },
+              "shift" : { "options" : ["inherit"],
+                          "i" : ["move_cursor", "up"],
+                          "j" : ["move_cursor", "left"],
+                          "k" : ["move_cursor", "down"],
+                          "l" : ["move_cursor", "right"] },
               # "volder_edit" : { "a" : "enlarge_volder_at_point",
               #                   "z" : "shrink_volder_at_point",
               #                   "i" : ["move_volder_at_point", "up"],
               #                   "j" : ["move_volder_at_point", "left"],
               #                   "k" : ["move_volder_at_point", "down"],
               #                   "l" : ["move_volder_at_point", "right"] },
-              "actions" : self.expand_action_specs("zoom", "move")
-                                                   # "move_cursor",
+              "actions" : self.expand_action_specs("zoom", "move",
+                                                   "move_cursor")
                                                    # "move_volder_at_point",
                                                    # "enlarge_volder_at_point",
                                                    # "shrink_volder_at_point")
@@ -472,12 +472,32 @@ class PicturesWithHolesWidget(QWidget):
     def move_stopper(self, direction):
         self.action_timer.timeout.disconnect(self.move)
         self.action_timer.stop()
+
+    def move_cursor_starter(self, direction):
+        direction_map = { 'left' : (-MOVE_SPEED, 0),
+                          'right' : (MOVE_SPEED, 0),
+                          'up' : (0, -MOVE_SPEED),
+                          'down' : (0, MOVE_SPEED) }
+        (self.the_move_x, self.the_move_y) = direction_map[direction]
+        self.action_timer.timeout.connect(self.move_cursor)
+        self.action_timer.start()
     
+    def move_cursor_stopper(self, direction):
+        self.action_timer.timeout.disconnect(self.move_cursor)
+        self.action_timer.stop()
+            
     def move(self, x=None, y=None):
+        print "I'm moving"
         self.pics.move(x or self.the_move_x,
                        y or self.the_move_y)
         self.sync_and_redraw()
-    
+
+    def move_cursor(self, x=None, y=None):
+        print "I'm moving cursor!"
+        pos = QCursor().pos()
+        QCursor().setPos(pos.x() + (x or self.the_move_x),
+                         pos.y() + (y or self.the_move_y))
+            
     def keyReleaseEvent(self, event):
         if event.isAutoRepeat():
             return
@@ -616,14 +636,17 @@ class ModalDispatcher(object):
         return self.current_mode.actions.has_key(key)
 
     def try_activate_mode(self, key):
+        print "Trying to activate mode", key
         if self.action is not None:
             return
 
         with locking_attr(self):
             mode_name = self.current_mode.modes[key]
+            print "Mode name is", mode_name
             self.mode_stack.append([mode_name, key, self.current_mode])
             self.current_mode = Mode(self.current_mode,
                                      self.mode_descriptions[mode_name])
+            print "Mode activated:", mode_name
 
     def try_start_action(self, key):
         print "Trying to start action", key
@@ -656,7 +679,7 @@ class ModalDispatcher(object):
         self.stop_current_action()
 
         with locking_attr(self):
-            while self.mode_stack[0, 1] != key:
+            while self.mode_stack[0][1] != key:
                 self.mode_stack.pop()
             (_, _, old_mode) = self.mode_stack.pop()
             self.current_mode = old_mode
@@ -689,7 +712,7 @@ def locking_attr(x, attr_name="action", value_after=None):
             
         def __exit__(self, type, value, traceback):
             setattr(x, attr_name, value_after)
-            return True
+            return False
 
     return Frob()
     
@@ -701,6 +724,9 @@ class Mode(object):
         self.copy_if_inherit(old_mode, description)
 
         for (key, spec) in description.iteritems():
+            if key == 'options':
+                continue
+            
             if isinstance(spec, basestring):
                 spec = [spec]
 
@@ -708,6 +734,7 @@ class Mode(object):
                 self.modes[qt_key_from_string(key)] = spec[1]
             else:
                 self.actions[qt_key_from_string(key)] = spec
+        print "Modes", self.modes, "actions", self.actions
 
     def copy_if_inherit(self, old_mode, description):
         if 'inherit' in description.get('options', []):
