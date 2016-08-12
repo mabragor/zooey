@@ -33,12 +33,18 @@ NUM_HOLES = 3
 def linear_transform(src, dst):
     zoom_x = float(dst.width())/src.width()
     zoom_y = float(dst.height())/src.height()
-    
-    return (lambda rect:
-            QRectF(dst.x() + float(rect.x() - src.x()) * zoom_x,
-                   dst.y() + float(rect.y() - src.y()) * zoom_y,
-                   rect.width() * zoom_x,
-                   rect.height() * zoom_y))
+
+    def foo(thing):
+        if isinstance(thing, QRectF):
+            return QRectF(dst.x() + float(thing.x() - src.x()) * zoom_x,
+                          dst.y() + float(thing.y() - src.y()) * zoom_y,
+                          thing.width() * zoom_x,
+                          thing.height() * zoom_y)
+        else:
+            return QPointF(dst.x() + float(thing.x() - src.x()) * zoom_x,
+                           dst.y() + float(thing.y() - src.y()) * zoom_y)
+        
+    return foo
 
 
 
@@ -68,6 +74,9 @@ def random_sketches_fname():
         populate_all_sketches()
 
     return os.path.join(DRAFTS_SKETCHES_PATH, random.choice(ALL_SKETCHES))
+
+class DontWannaStart(Exception):
+    pass
 
 class Hole(object):
     def __init__(self, parent_rectf, pic=None, hole=None):
@@ -126,6 +135,13 @@ class Hole(object):
     def rescale(self, x_m, y_m, zoom=1.0):
         self.hole = QRectF(float(self.hole.x() - x_m) * zoom + x_m,
                            float(self.hole.y() - y_m) * zoom + y_m,
+                           self.hole.width() * zoom,
+                           self.hole.height() * zoom)
+
+    def central_rescale(self, zoom=1.0):
+        center = self.hole.center()
+        self.hole = QRectF(float(self.hole.x() - center.x()) * zoom + center.x(),
+                           float(self.hole.y() - center.y()) * zoom + center.y(),
                            self.hole.width() * zoom,
                            self.hole.height() * zoom)
         
@@ -204,41 +220,6 @@ class Hole(object):
         if self.pic is None:
             return 0
         return self.pic.recursive_active_pics()
-
-    # def recursive_draw(self, image, frame=None, distance=None):
-    #     if self.pic is None:
-    #         return # we just do nothing
-        
-    #     if frame is None: # it means we are at the toplevel
-    #         frame = self.parent_rectf
-    #         distance = 1.0
-
-    #     intersection = self.hole.intersected(frame)
-    #     intersection_src = linear_transform(self.hole, self.child_rectf)(intersection)
-            
-    #     sub_image = self.pic.recursive_draw(intersection_src,
-    #                                         distance = distance * self.hole_scale())
-    #     painter = QPainter()
-    #     painter.begin(image)
-
-    #     # # we copy a hole region from image
-    #     # hole_parent_image = image.copy(intersection.toAlignedRect())
-    #     # we fill it white, with black border
-    #     painter.setOpacity(1.0)
-    #     painter.fillRect(intersection, QtCore.Qt.white)
-    #     painter.setPen(QtCore.Qt.black)
-    #     painter.drawRect(intersection)
-
-    #     # # we redraw it parent-transparent
-    #     # painter.setOpacity(parent_opacity(distance))
-    #     # painter.drawImage(intersection, hole_parent_image)
-        
-    #     # # we draw child-transparent subimage on top of it
-    #     # sub_image.setAlphaChannel(sub_image.createMaskFromColor(QtCore.Qt.white, 1))
-    #     # painter.setOpacity(child_opacity(distance))
-    #     # painter.drawImage(intersection, sub_image, intersection_src)
-
-    #     painter.end()
 
     def draw_border(self, target_image, dest_rectf, src_rectf):
         painter = QPainter()
@@ -364,24 +345,23 @@ class PicturesWithHolesWidget(QWidget):
                          "j" : ["move", "left"],
                          "k" : ["move", "down"],
                          "l" : ["move", "right"],
-                         "shift" : ["mode", "shift"] },
-                         # "e" : ["mode", "volder_edit"] },
+                         "shift" : ["mode", "shift"],
+                         "e" : ["mode", "volder_edit"] },
               "shift" : { "options" : ["inherit"],
                           "i" : ["move_cursor", "up"],
                           "j" : ["move_cursor", "left"],
                           "k" : ["move_cursor", "down"],
                           "l" : ["move_cursor", "right"] },
-              # "volder_edit" : { "a" : "enlarge_volder_at_point",
-              #                   "z" : "shrink_volder_at_point",
-              #                   "i" : ["move_volder_at_point", "up"],
-              #                   "j" : ["move_volder_at_point", "left"],
-              #                   "k" : ["move_volder_at_point", "down"],
-              #                   "l" : ["move_volder_at_point", "right"] },
+              "volder_edit" : { "a" : ["zoom_volder_at_point", "enlarge"],
+                                "z" : ["zoom_volder_at_point", "shrink"] },
+                                # "i" : ["move_volder_at_point", "up"],
+                                # "j" : ["move_volder_at_point", "left"],
+                                # "k" : ["move_volder_at_point", "down"],
+                                # "l" : ["move_volder_at_point", "right"] },
               "actions" : self.expand_action_specs("zoom", "move",
-                                                   "move_cursor")
+                                                   "move_cursor",
                                                    # "move_volder_at_point",
-                                                   # "enlarge_volder_at_point",
-                                                   # "shrink_volder_at_point")
+                                                   "zoom_volder_at_point")
             })
 
     def expand_action_specs(self, *specs):
@@ -460,6 +440,33 @@ class PicturesWithHolesWidget(QWidget):
         self.action_timer.timeout.disconnect(self.zoom_to_cursor)
         self.action_timer.stop()
 
+    def find_volder_at_point(self):
+        (x_m, y_m) = self.cursor_relative_position()
+        point = linear_transform(self.pics.hole, self.pics.child_rectf)(QPointF(x_m, y_m))
+        for child in self.pics.pic.children:
+            if child.hole.contains(point):
+                self.the_volder_at_point = child
+                return True
+        return False
+        
+    def zoom_volder_at_point_starter(self, direction):
+        if not self.find_volder_at_point():
+            raise DontWannaStart
+        
+        if direction == 'enlarge':
+            self.the_zoom_delta = 0.1
+        elif direction == 'shrink':
+            self.the_zoom_delta = -0.1
+        else:
+            raise Exception("Bad zoom direction" + str(direction))
+            
+        self.action_timer.timeout.connect(self.zoom_volder_at_point)
+        self.action_timer.start()
+
+    def zoom_volder_at_point_stopper(self, direction):
+        self.action_timer.timeout.disconnect(self.zoom_volder_at_point)
+        self.action_timer.stop()
+        
     def move_starter(self, direction):
         direction_map = { 'left' : (MOVE_SPEED, 0),
                           'right' : (-MOVE_SPEED, 0),
@@ -506,22 +513,32 @@ class PicturesWithHolesWidget(QWidget):
             
     def wheelEvent(self, event):
         self.zoom_to_cursor(0.1 * float(event.delta())/8/15/20)
+
+    def cursor_relative_position(self):
+        pos = QCursor().pos()
+        x_image = float(self.width() - self.the_qimage.width())/2
+        y_image = float(self.height() - self.the_qimage.height())/2
+        return (pos.x() - x_image, pos.y() - y_image)
         
     def zoom_to_cursor(self, delta_zoom=None):
         if not delta_zoom:
             delta_zoom = self.the_zoom_delta
-            
-        pos = QCursor().pos()
-        x_image = float(self.width() - self.the_qimage.width())/2
-        y_image = float(self.height() - self.the_qimage.height())/2
-        x_m = pos.x() - x_image
-        y_m = pos.y() - y_image
+
+        (x_m, y_m) = self.cursor_relative_position()
         zoom = (1.0 + delta_zoom)
         ## print "Zoom:", zoom
 
         self.pics.rescale(x_m, y_m, zoom=zoom)
         self.sync_and_redraw()
 
+    def zoom_volder_at_point(self, delta_zoom=None):
+        if not delta_zoom:
+            delta_zoom = self.the_zoom_delta
+
+        self.the_volder_at_point.central_rescale(1.0 + delta_zoom)
+
+        self.sync_and_redraw()
+        
     def sync_and_redraw(self):
         self.pics.recursive_sync()
         
@@ -658,9 +675,12 @@ class ModalDispatcher(object):
         try:
             apply(self.action_starter(action_name_and_args[0]),
                   action_name_and_args[1:])
-        except Exception as e:
+        except DontWannaStart:
+            print "Got dont wanna start"
             self.action = None
-            raise e
+        except Exception:
+            self.action = None
+            raise
         else:
             self.action = action_name_and_args
 
