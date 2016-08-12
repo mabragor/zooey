@@ -14,6 +14,7 @@ import os
 import popplerqt4
 import time
 import random
+from string import capwords
 
 PDF_BASE_RESOLUTION = 72.0
 THE_X = 0
@@ -620,13 +621,65 @@ class PicturesWithHolesWidget(QWidget):
     def stop(self):
         QtCore.QCoreApplication.instance().quit()
 
+KEYNAMES_EXCEPTION_TABLE = {
+    "sys_req" : QtCore.Qt.Key_SysReq,
+    "page_up" : QtCore.Qt.Key_PageUp,
+    "page_down" : QtCore.Qt.Key_PageDown,
+    "alt_gr" : QtCore.Qt.Key_AltGr,
+    "caps_lock" : QtCore.Qt.Key_CapsLock,
+    "num_lock" : QtCore.Qt.Key_NumLock,
+    "scroll_lock" : QtCore.Qt.Key_ScrollLock,
+    "quote_dbl" : QtCore.Qt.Key_QuoteDbl,
+    "number_sign" : QtCore.Qt.Key_NumberSign,
+    "paren_left" : QtCore.Qt.Key_ParenLeft,
+    "paren_right" : QtCore.Qt.Key_ParenRight,
+    "bracket_left" : QtCore.Qt.Key_BracketLeft,
+    "bracket_right" : QtCore.Qt.Key_BracketRight,
+    "ascii_circum" : QtCore.Qt.Key_AsciiCircum,
+    "quote_left" : QtCore.Qt.Key_QuoteLeft,
+    "brace_left" : QtCore.Qt.Key_BraceLeft,
+    "brace_right" : QtCore.Qt.Key_BraceRight,
+    "ascii_tilde" : QtCore.Qt.Key_AsciiTilde,
+    "no_break_space" : QtCore.Qt.nobreakspace,
+    "exclamdown" : QtCore.Qt.exclamdown,
+    "cent" : QtCore.Qt.cent,
+    "sterling" : QtCore.Qt.sterling,
+    "currency" : QtCore.Qt.currency,
+    "yen" : QtCore.Qt.yen,
+    "broken_bar" : QtCore.Qt.brokenbar,
+    "section" : QtCore.Qt.section,
+    "diaeresis" : QtCore.Qt.diaeresis,
+    "copyright" : QtCore.Qt.copyright
+    # there are more of these, but I'm lazy right now
+    }
+
+def qt_key_from_string(key):
+    if KEYNAMES_EXCEPTION_TABLE.has_key(key):
+        return KEYNAMES_EXCEPTION_TABLE[key]
+
+    return getattr(QtCore.Qt, "Key_" + capwords(key, "_"))
+
+        
 class ModalDispatcher(object):
     def __init__(self, keymap_description):
         self.parse_keymap_description(keymap_description)
 
     def parse_keymap_description(self, keymap_description):
-        pass
+        # first we list all the available actions
+        actions = keymap_description["actions"]
+        for action in actions:
+            self.action_starters[action[0]] = action[1]
+            self.action_stoppers[action[0]] = action[2]
 
+        self.mode_descriptions = keymap_description.copy()
+        self.mode_descriptions.pop("actions", None)
+
+    def action_starter(self, name):
+        return self.action_starters[name]
+
+    def action_stopper(self, name):
+        return self.action_stoppers[name]
+    
     def press(self, key):
         if self.mode_key_p(key):
             self.try_activate_mode(key)
@@ -646,7 +699,8 @@ class ModalDispatcher(object):
         with locking_attr(self):
             mode_name = self.current_mode.modes[key]
             self.mode_stack.append([mode_name, key, self.current_mode])
-            self.current_mode = Mode(self.current_mode, mode_name)
+            self.current_mode = Mode(self.current_mode,
+                                     self.mode_descriptions[mode_name])
 
     def try_start_action(self, key):
         if self.action is not None:
