@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+from __future__ import with_statement
+
 import sys
 from PyQt4.QtGui import (QPalette, QWidget, QApplication, QPainter, QColor, QCursor, QImage)
 from PyQt4 import QtCore
@@ -349,9 +351,52 @@ class PicturesWithHolesWidget(QWidget):
 
         self.showMaximized()
         self.show()
-        
-        self.init_key_actions()
 
+        self.init_modal_dispatcher()
+        # self.init_key_actions()
+
+    def init_modal_dispatcher(self):
+        self.modal_dispatcher = ModalDispatcher(
+            { "main" : { "a" : ["zoom", "in"],
+                         "z" : ["zoom", "out"],
+                         "i" : ["move", "up"],
+                         "j" : ["move", "left"],
+                         "k" : ["move", "down"],
+                         "l" : ["move", "right"],
+                         "shift" : ["mode", "shift"],
+                         "e" : ["mode", "volder_edit"] },
+              "shift" : { "options" : ["inherit"],
+                          "i" : ["move_cursor", "up"],
+                          "j" : ["move_cursor", "left"],
+                          "k" : ["move_cursor", "down"],
+                          "l" : ["move_cursor", "right"] },
+              "volder_edit" : { "a" : "enlarge_volder_at_point",
+                                "z" : "shrink_volder_at_point",
+                                "i" : ["move_volder_at_point", "up"],
+                                "j" : ["move_volder_at_point", "left"],
+                                "k" : ["move_volder_at_point", "down"],
+                                "l" : ["move_volder_at_point", "right"] },
+              "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
+                                                   "move_volder_at_point",
+                                                   "enlarge_volder_at_point",
+                                                   "shrink_volder_at_point") })
+
+    def expand_action_specs(self, *specs):
+        def foo(x):
+            if isinstance(spec, basestring):
+                return [spec,
+                        self.make_curry(getattr(self, spec + "_starter")),
+                        self.make_curry(getattr(self, spec + "_stopper"))]
+            else:
+                return x
+                        
+        return map(foo, specs)
+        
+    def make_curry(self, method):
+        def frob(*args, **kwds):
+            return method(self, *args, **kwds)
+        return frob
+        
     def init_key_actions(self):
         self.action_timer = QtCore.QTimer()
         self.action_timer.setInterval(10)
@@ -397,24 +442,29 @@ class PicturesWithHolesWidget(QWidget):
             return
         if event.key() == QtCore.Qt.Key_Escape:
             self.stop()
-        elif event.key() == QtCore.Qt.Key_A:
-            print "Key A was pressed, # active pics:", self.num_active_pics()
-            self.try_start_action("zoom_in")
-        elif event.key() == QtCore.Qt.Key_Z:
-            print "Key Z was pressed, # active pics:", self.num_active_pics()
-            self.try_start_action("zoom_out")
-        elif event.key() == QtCore.Qt.Key_J:
-            print "Key J was pressed, # active pics:", self.num_active_pics()
-            self.try_start_action("move_left")
-        elif event.key() == QtCore.Qt.Key_L:
-            print "Key L was pressed, # active pics:", self.num_active_pics()
-            self.try_start_action("move_right")
-        elif event.key() == QtCore.Qt.Key_I:
-            print "Key I was pressed, # active pics:", self.num_active_pics()
-            self.try_start_action("move_up")
-        elif event.key() == QtCore.Qt.Key_K:
-            print "Key K was pressed, # active pics:", self.num_active_pics()
-            self.try_start_action("move_down")
+            return
+
+        self.modal_dispatcher.press(event.key())
+        
+            
+        # elif event.key() == QtCore.Qt.Key_A:
+        #     print "Key A was pressed, # active pics:", self.num_active_pics()
+        #     self.try_start_action("zoom_in")
+        # elif event.key() == QtCore.Qt.Key_Z:
+        #     print "Key Z was pressed, # active pics:", self.num_active_pics()
+        #     self.try_start_action("zoom_out")
+        # elif event.key() == QtCore.Qt.Key_J:
+        #     print "Key J was pressed, # active pics:", self.num_active_pics()
+        #     self.try_start_action("move_left")
+        # elif event.key() == QtCore.Qt.Key_L:
+        #     print "Key L was pressed, # active pics:", self.num_active_pics()
+        #     self.try_start_action("move_right")
+        # elif event.key() == QtCore.Qt.Key_I:
+        #     print "Key I was pressed, # active pics:", self.num_active_pics()
+        #     self.try_start_action("move_up")
+        # elif event.key() == QtCore.Qt.Key_K:
+        #     print "Key K was pressed, # active pics:", self.num_active_pics()
+        #     self.try_start_action("move_down")
             
     def try_start_action(self, name):
         if self.action_type is not None:
@@ -494,24 +544,27 @@ class PicturesWithHolesWidget(QWidget):
     def keyReleaseEvent(self, event):
         if event.isAutoRepeat():
             return
-        if event.key() == QtCore.Qt.Key_A:
-            print "Key A was released, # active pics:", self.num_active_pics()
-            self.try_stop_action("zoom_in")
-        elif event.key() == QtCore.Qt.Key_Z:
-            print "Key Z was released, # active pics:", self.num_active_pics()
-            self.try_stop_action("zoom_out")
-        elif event.key() == QtCore.Qt.Key_J:
-            print "Key J was released, # active pics:", self.num_active_pics()
-            self.try_stop_action("move_left")
-        elif event.key() == QtCore.Qt.Key_L:
-            print "Key L was released, # active pics:", self.num_active_pics()
-            self.try_stop_action("move_right")
-        elif event.key() == QtCore.Qt.Key_I:
-            print "Key I was released, # active pics:", self.num_active_pics()
-            self.try_stop_action("move_up")
-        elif event.key() == QtCore.Qt.Key_K:
-            print "Key K was released, # active pics:", self.num_active_pics()
-            self.try_stop_action("move_down")
+
+        self.modal_dispatcher.release(event.key())
+        
+        # if event.key() == QtCore.Qt.Key_A:
+        #     print "Key A was released, # active pics:", self.num_active_pics()
+        #     self.try_stop_action("zoom_in")
+        # elif event.key() == QtCore.Qt.Key_Z:
+        #     print "Key Z was released, # active pics:", self.num_active_pics()
+        #     self.try_stop_action("zoom_out")
+        # elif event.key() == QtCore.Qt.Key_J:
+        #     print "Key J was released, # active pics:", self.num_active_pics()
+        #     self.try_stop_action("move_left")
+        # elif event.key() == QtCore.Qt.Key_L:
+        #     print "Key L was released, # active pics:", self.num_active_pics()
+        #     self.try_stop_action("move_right")
+        # elif event.key() == QtCore.Qt.Key_I:
+        #     print "Key I was released, # active pics:", self.num_active_pics()
+        #     self.try_stop_action("move_up")
+        # elif event.key() == QtCore.Qt.Key_K:
+        #     print "Key K was released, # active pics:", self.num_active_pics()
+        #     self.try_stop_action("move_down")
             
     def wheelEvent(self, event):
         self.zoom_to_cursor(0.1 * float(event.delta())/8/15/20)
@@ -567,6 +620,104 @@ class PicturesWithHolesWidget(QWidget):
     def stop(self):
         QtCore.QCoreApplication.instance().quit()
 
+class ModalDispatcher(object):
+    def __init__(self, keymap_description):
+        self.parse_keymap_description(keymap_description)
+
+    def parse_keymap_description(self, keymap_description):
+        pass
+
+    def press(self, key):
+        if self.mode_key_p(key):
+            self.try_activate_mode(key)
+        elif self.action_key_p(key):
+            self.try_start_action(key)
+
+    def mode_key_p(self, key):
+        return self.current_mode.modes.has_key(key)
+
+    def action_key_p(self, key):
+        return self.current_mode.actions.has_key(key)
+
+    def try_activate_mode(self, key):
+        if self.action is not None:
+            return
+
+        with locking_attr(self):
+            mode_name = self.current_mode.modes[key]
+            self.mode_stack.append([mode_name, key, self.current_mode])
+            self.current_mode = Mode(self.current_mode, mode_name)
+
+    def try_start_action(self, key):
+        if self.action is not None:
+            return
+
+        self.action = 'lock'
+        action_name_and_args = self.current_mode.actions[key]
+        try:
+            apply(self.action_starter(action_name_and_args[0]),
+                  action_name_and_args[1:])
+        except:
+            self.action = None
+        else:
+            self.action = action_name_and_args
+
+    def release(self, key):
+        if self.mode_in_stack_key_p(key):
+            self.unwind_mode_stack(key)
+        elif self.action_key_p(key):
+            self.try_stop_action(key)
+
+    def mode_in_stack_key_p(self, key):
+        lst = filter(lambda x: x[1] == key,
+                     self.mode_stack)
+        return len(lst) == 1
+            
+    def unwind_mode_stack(self, key):
+        self.stop_current_action()
+
+        with locking_attr(self):
+            while self.mode_stack[0, 1] != key:
+                self.mode_stack.pop()
+            (None, None, old_mode) = self.mode_stack.pop()
+            self.current_mode = old_mode
+
+    def stop_current_action(self):
+        if self.action is None:
+            return
+
+        action = self.action
+        with locking_attr(self):
+            apply(self.action_stopper(action[0]), action[1:])
+
+    def try_stop_action(self, key):
+        if self.action is None:
+            return
+
+        if self.action == self.current_mode.actions(key):
+            self.stop_current_action()
+            
+def locking_attr(x, attr_name="action", value_after=None):
+    class Frob(object):
+        def __enter__(self):
+            it = getattr(x, attr_name)
+            if it is not None:
+                raise "Attempt to lock a not-None field", it
+
+            setattr(x, attr_name, 'lock')
+            return True
+            
+        def __exit__(self, type, value, traceback):
+            setattr(x, attr_name, value_after)
+            return True
+
+    return Frob()
+    
+    
+    
+class Mode(object):
+    pass
+        
 if __name__ == '__main__':
     
     app = QApplication(sys.argv)
