@@ -354,7 +354,7 @@ class PicturesWithHolesWidget(QWidget):
         self.show()
 
         self.init_modal_dispatcher()
-        # self.init_key_actions()
+        self.init_action_timer()
 
     def init_modal_dispatcher(self):
         self.modal_dispatcher = ModalDispatcher(
@@ -363,48 +363,46 @@ class PicturesWithHolesWidget(QWidget):
                          "i" : ["move", "up"],
                          "j" : ["move", "left"],
                          "k" : ["move", "down"],
-                         "l" : ["move", "right"],
-                         "shift" : ["mode", "shift"],
-                         "e" : ["mode", "volder_edit"] },
-              "shift" : { "options" : ["inherit"],
-                          "i" : ["move_cursor", "up"],
-                          "j" : ["move_cursor", "left"],
-                          "k" : ["move_cursor", "down"],
-                          "l" : ["move_cursor", "right"] },
-              "volder_edit" : { "a" : "enlarge_volder_at_point",
-                                "z" : "shrink_volder_at_point",
-                                "i" : ["move_volder_at_point", "up"],
-                                "j" : ["move_volder_at_point", "left"],
-                                "k" : ["move_volder_at_point", "down"],
-                                "l" : ["move_volder_at_point", "right"] },
-              "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
-                                                   "move_volder_at_point",
-                                                   "enlarge_volder_at_point",
-                                                   "shrink_volder_at_point") })
+                         "l" : ["move", "right"] },
+              #            "shift" : ["mode", "shift"],
+              #            "e" : ["mode", "volder_edit"] },
+              # "shift" : { "options" : ["inherit"],
+              #             "i" : ["move_cursor", "up"],
+              #             "j" : ["move_cursor", "left"],
+              #             "k" : ["move_cursor", "down"],
+              #             "l" : ["move_cursor", "right"] },
+              # "volder_edit" : { "a" : "enlarge_volder_at_point",
+              #                   "z" : "shrink_volder_at_point",
+              #                   "i" : ["move_volder_at_point", "up"],
+              #                   "j" : ["move_volder_at_point", "left"],
+              #                   "k" : ["move_volder_at_point", "down"],
+              #                   "l" : ["move_volder_at_point", "right"] },
+              "actions" : self.expand_action_specs("zoom", "move")
+                                                   # "move_cursor",
+                                                   # "move_volder_at_point",
+                                                   # "enlarge_volder_at_point",
+                                                   # "shrink_volder_at_point")
+            })
 
     def expand_action_specs(self, *specs):
-        def foo(x):
+        def expand_one_spec(spec):
             if isinstance(spec, basestring):
                 return [spec,
-                        self.make_curry(getattr(self, spec + "_starter")),
-                        self.make_curry(getattr(self, spec + "_stopper"))]
+                        getattr(self, spec + "_starter"),
+                        getattr(self, spec + "_stopper")]
             else:
-                return x
+                return spec
                         
-        return map(foo, specs)
+        return map(expand_one_spec, specs)
         
     def make_curry(self, method):
         def frob(*args, **kwds):
             return method(self, *args, **kwds)
         return frob
         
-    def init_key_actions(self):
+    def init_action_timer(self):
         self.action_timer = QtCore.QTimer()
         self.action_timer.setInterval(10)
-
-        self.action_lock = False
-        self.action_type = None
-        # self.the_zoom_delta = 0
 
     def num_active_pics(self):
         return self.pics.recursive_active_pics()
@@ -447,95 +445,33 @@ class PicturesWithHolesWidget(QWidget):
 
         self.modal_dispatcher.press(event.key())
         
+    def zoom_starter(self, direction):
+        if direction == 'in':
+            self.the_zoom_delta = 0.1
+        elif direction == 'out':
+            self.the_zoom_delta = -0.1
+        else:
+            raise Exception("Bad zoom direction" + str(direction))
             
-        # elif event.key() == QtCore.Qt.Key_A:
-        #     print "Key A was pressed, # active pics:", self.num_active_pics()
-        #     self.try_start_action("zoom_in")
-        # elif event.key() == QtCore.Qt.Key_Z:
-        #     print "Key Z was pressed, # active pics:", self.num_active_pics()
-        #     self.try_start_action("zoom_out")
-        # elif event.key() == QtCore.Qt.Key_J:
-        #     print "Key J was pressed, # active pics:", self.num_active_pics()
-        #     self.try_start_action("move_left")
-        # elif event.key() == QtCore.Qt.Key_L:
-        #     print "Key L was pressed, # active pics:", self.num_active_pics()
-        #     self.try_start_action("move_right")
-        # elif event.key() == QtCore.Qt.Key_I:
-        #     print "Key I was pressed, # active pics:", self.num_active_pics()
-        #     self.try_start_action("move_up")
-        # elif event.key() == QtCore.Qt.Key_K:
-        #     print "Key K was pressed, # active pics:", self.num_active_pics()
-        #     self.try_start_action("move_down")
-            
-    def try_start_action(self, name):
-        if self.action_type is not None:
-            return
-
-        self.action_type = name
-        res = getattr(self, name + "_starter")()
-        if res:
-            self.action_timer.start()
-
-    def zoom_in_starter(self):
-        self.the_zoom_delta = 0.1
         self.action_timer.timeout.connect(self.zoom_to_cursor)
-        return True
+        self.action_timer.start()
 
-    def zoom_out_starter(self):
-        self.the_zoom_delta = -0.1
-        self.action_timer.timeout.connect(self.zoom_to_cursor)
-        return True
-
-    def try_stop_action(self, name):
-        if not(self.action_type and self.action_type == name):
-            return
-
-        res = getattr(self, name + "_stopper")()
-        if res:
-            self.action_timer.stop()
-        self.action_type = None
-
-    def zoom_in_stopper(self):
+    def zoom_stopper(self, direction):
         self.action_timer.timeout.disconnect(self.zoom_to_cursor)
-        return True
+        self.action_timer.stop()
 
-    def zoom_out_stopper(self):
-        self.action_timer.timeout.disconnect(self.zoom_to_cursor)
-        return True
-
-    def move_left_starter(self):
-        self.the_move_x = MOVE_SPEED
-        self.the_move_y = 0
+    def move_starter(self, direction):
+        direction_map = { 'left' : (MOVE_SPEED, 0),
+                          'right' : (-MOVE_SPEED, 0),
+                          'up' : (0, MOVE_SPEED),
+                          'down' : (0, -MOVE_SPEED) }
+        (self.the_move_x, self.the_move_y) = direction_map[direction]
         self.action_timer.timeout.connect(self.move)
-        return True
-    def move_right_starter(self):
-        self.the_move_x = -MOVE_SPEED
-        self.the_move_y = 0
-        self.action_timer.timeout.connect(self.move)
-        return True
-    def move_up_starter(self):
-        self.the_move_x = 0
-        self.the_move_y = MOVE_SPEED
-        self.action_timer.timeout.connect(self.move)
-        return True
-    def move_down_starter(self):
-        self.the_move_x = 0
-        self.the_move_y = -MOVE_SPEED
-        self.action_timer.timeout.connect(self.move)
-        return True
+        self.action_timer.start()
     
-    def move_left_stopper(self):
+    def move_stopper(self, direction):
         self.action_timer.timeout.disconnect(self.move)
-        return True
-    def move_right_stopper(self):
-        self.action_timer.timeout.disconnect(self.move)
-        return True
-    def move_up_stopper(self):
-        self.action_timer.timeout.disconnect(self.move)
-        return True
-    def move_down_stopper(self):
-        self.action_timer.timeout.disconnect(self.move)
-        return True
+        self.action_timer.stop()
     
     def move(self, x=None, y=None):
         self.pics.move(x or self.the_move_x,
@@ -547,25 +483,6 @@ class PicturesWithHolesWidget(QWidget):
             return
 
         self.modal_dispatcher.release(event.key())
-        
-        # if event.key() == QtCore.Qt.Key_A:
-        #     print "Key A was released, # active pics:", self.num_active_pics()
-        #     self.try_stop_action("zoom_in")
-        # elif event.key() == QtCore.Qt.Key_Z:
-        #     print "Key Z was released, # active pics:", self.num_active_pics()
-        #     self.try_stop_action("zoom_out")
-        # elif event.key() == QtCore.Qt.Key_J:
-        #     print "Key J was released, # active pics:", self.num_active_pics()
-        #     self.try_stop_action("move_left")
-        # elif event.key() == QtCore.Qt.Key_L:
-        #     print "Key L was released, # active pics:", self.num_active_pics()
-        #     self.try_stop_action("move_right")
-        # elif event.key() == QtCore.Qt.Key_I:
-        #     print "Key I was released, # active pics:", self.num_active_pics()
-        #     self.try_stop_action("move_up")
-        # elif event.key() == QtCore.Qt.Key_K:
-        #     print "Key K was released, # active pics:", self.num_active_pics()
-        #     self.try_stop_action("move_down")
             
     def wheelEvent(self, event):
         self.zoom_to_cursor(0.1 * float(event.delta())/8/15/20)
@@ -640,16 +557,16 @@ KEYNAMES_EXCEPTION_TABLE = {
     "brace_left" : QtCore.Qt.Key_BraceLeft,
     "brace_right" : QtCore.Qt.Key_BraceRight,
     "ascii_tilde" : QtCore.Qt.Key_AsciiTilde,
-    "no_break_space" : QtCore.Qt.nobreakspace,
-    "exclamdown" : QtCore.Qt.exclamdown,
-    "cent" : QtCore.Qt.cent,
-    "sterling" : QtCore.Qt.sterling,
-    "currency" : QtCore.Qt.currency,
-    "yen" : QtCore.Qt.yen,
-    "broken_bar" : QtCore.Qt.brokenbar,
-    "section" : QtCore.Qt.section,
-    "diaeresis" : QtCore.Qt.diaeresis,
-    "copyright" : QtCore.Qt.copyright
+    # "no_break_space" : QtCore.Qt.nobreakspace,
+    # "exclamdown" : QtCore.Qt.exclamdown,
+    # "cent" : QtCore.Qt.cent,
+    # "sterling" : QtCore.Qt.sterling,
+    # "currency" : QtCore.Qt.currency,
+    # "yen" : QtCore.Qt.yen,
+    # "broken_bar" : QtCore.Qt.brokenbar,
+    # "section" : QtCore.Qt.section,
+    # "diaeresis" : QtCore.Qt.diaeresis,
+    # "copyright" : QtCore.Qt.copyright
     # there are more of these, but I'm lazy right now
     }
 
@@ -667,6 +584,8 @@ class ModalDispatcher(object):
     def parse_keymap_description(self, keymap_description):
         # first we list all the available actions
         actions = keymap_description["actions"]
+        self.action_starters = {}
+        self.action_stoppers = {}
         for action in actions:
             self.action_starters[action[0]] = action[1]
             self.action_stoppers[action[0]] = action[2]
@@ -674,6 +593,10 @@ class ModalDispatcher(object):
         self.mode_descriptions = keymap_description.copy()
         self.mode_descriptions.pop("actions", None)
 
+        self.mode_stack = []
+        self.current_mode = Mode(None, self.mode_descriptions['main'])
+        self.action = None
+        
     def action_starter(self, name):
         return self.action_starters[name]
 
@@ -703,6 +626,7 @@ class ModalDispatcher(object):
                                      self.mode_descriptions[mode_name])
 
     def try_start_action(self, key):
+        print "Trying to start action", key
         if self.action is not None:
             return
 
@@ -711,8 +635,9 @@ class ModalDispatcher(object):
         try:
             apply(self.action_starter(action_name_and_args[0]),
                   action_name_and_args[1:])
-        except:
+        except Exception as e:
             self.action = None
+            raise e
         else:
             self.action = action_name_and_args
 
@@ -733,7 +658,7 @@ class ModalDispatcher(object):
         with locking_attr(self):
             while self.mode_stack[0, 1] != key:
                 self.mode_stack.pop()
-            (None, None, old_mode) = self.mode_stack.pop()
+            (_, _, old_mode) = self.mode_stack.pop()
             self.current_mode = old_mode
 
     def stop_current_action(self):
@@ -741,14 +666,15 @@ class ModalDispatcher(object):
             return
 
         action = self.action
-        with locking_attr(self):
-            apply(self.action_stopper(action[0]), action[1:])
+        self.action = 'lock'
+        apply(self.action_stopper(action[0]), action[1:])
+        self.action = None
 
     def try_stop_action(self, key):
         if self.action is None:
             return
 
-        if self.action == self.current_mode.actions(key):
+        if self.action == self.current_mode.actions[key]:
             self.stop_current_action()
             
 def locking_attr(x, attr_name="action", value_after=None):
@@ -756,7 +682,7 @@ def locking_attr(x, attr_name="action", value_after=None):
         def __enter__(self):
             it = getattr(x, attr_name)
             if it is not None:
-                raise "Attempt to lock a not-None field", it
+                raise Exception("Attempt to lock a not-None field " + str(it))
 
             setattr(x, attr_name, 'lock')
             return True
@@ -767,10 +693,26 @@ def locking_attr(x, attr_name="action", value_after=None):
 
     return Frob()
     
-    
-    
 class Mode(object):
-    pass
+    def __init__(self, old_mode, description):
+        self.modes = {}
+        self.actions = {}
+
+        self.copy_if_inherit(old_mode, description)
+
+        for (key, spec) in description.iteritems():
+            if isinstance(spec, basestring):
+                spec = [spec]
+
+            if spec[0] == 'mode':
+                self.modes[qt_key_from_string(key)] = spec[1]
+            else:
+                self.actions[qt_key_from_string(key)] = spec
+
+    def copy_if_inherit(self, old_mode, description):
+        if 'inherit' in description.get('options', []):
+            self.modes = old_mode.modes.copy()
+            self.actions = old_mode.actions.copy()
         
 if __name__ == '__main__':
     
