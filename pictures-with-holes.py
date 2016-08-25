@@ -16,6 +16,8 @@ import time
 import random
 from string import capwords
 
+import hashlib
+
 PDF_BASE_RESOLUTION = 72.0
 THE_X = 0
 THE_Y = 0
@@ -29,6 +31,9 @@ DEFAULT_HOLE_SCALE = 4
 MOVE_SPEED = 10
 
 NUM_HOLES = 3
+
+def md5sum(string):
+    return int(hashlib.md5().update(my_string).hexdigest(), 16)
 
 def linear_transform(src, dst):
     zoom_x = float(dst.width())/src.width()
