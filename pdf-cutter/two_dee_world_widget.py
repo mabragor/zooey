@@ -3,10 +3,10 @@
 
 from PyQt4 import (QtCore)
 from PyQt4.QtGui import (QWidget, QImage, QPainter)
-from PyQt4.QtCore import (QRectF)
+from PyQt4.QtCore import (QRectF, QPointF, QSizeF)
 import time
 
-from linear_transform import linear_transform
+# from linear_transform import linear_transform
 from modal_dispatcher import ModalDispatcher
 
 THE_BLACK_BOX = QRectF(-50, -50, 100, 100)
@@ -14,23 +14,49 @@ FRAME_START_RATIO = 1.0
 
 MOVE_SPEED = 10
 
+class Camera(object):
+    def __init__(self, x = 0.0, y = 0.0, distance = 1.0):
+        self.x = x
+        self.y = y
+        # "absolute" sizes are distance * "camera" sizes -- the ones we see on screen
+        self.distance = float(distance)
+
+    def zoom(self, zoom):
+        self.distance /= zoom
+
+    def move(self, dx, dy):
+        self.x += dx # * self.distance
+        self.y += dy # * self.distance
+        
+    def to_screen(self, thing, screen_rect):
+        if isinstance(thing, QPointF):
+            return QPointF(self.x + (thing.x() - self.x)/self.distance + float(screen_rect.width())/2,
+                           self.y + (thing.y() - self.y)/self.distance + float(screen_rect.height())/2)
+        if isinstance(thing, float):
+            return thing/self.distance
+        if isinstance(thing, QRectF):
+            return QRectF(self.to_screen(thing.topLeft(), screen_rect),
+                          QSizeF(self.to_screen(thing.width(), screen_rect),
+                                 self.to_screen(thing.height(), screen_rect)))
+        raise Exception("Unknown type %s" % thing)
+        
 class PlanarWorldWidget(QWidget):
     def __init__(self):
         super(PlanarWorldWidget, self).__init__(None)
         self.ignore_events()
         # self.showMaximized()
         self.show()
-        self.init_frame_and_qimage()
+        self.init_camera_and_qimage()
+        
         self.init_modal_dispatcher()
         self.init_action_timer()
         self.receive_events()
 
-    def init_frame_and_qimage(self):
-        print "Initializing frame and qimage"
-        width = float(self.frameSize().width()) * FRAME_START_RATIO
-        height = float(self.frameSize().height()) * FRAME_START_RATIO
-        self.frame = QRectF(- width / 2, - height / 2, width, height)
-        print "In init frame", self.frame
+    def init_camera_and_qimage(self):
+        print "Initializing camera and qimage"
+        scale = min(float(self.frameSize().width()),
+                    float(self.frameSize().height()))
+        self.camera = Camera(distance=float(THE_BLACK_BOX.width())/scale)
         self.make_new_qimage(self.frameSize())
 
     def init_action_timer(self):
@@ -78,16 +104,7 @@ class PlanarWorldWidget(QWidget):
         if not delta_zoom:
             delta_zoom = self.the_zoom_delta
 
-        zoom = (1.0 + delta_zoom)
-        center = self.frame.center()
-        new_width = self.frame.width() / zoom
-        new_height = self.frame.height() / zoom
-        self.frame = QRectF(center.x() - new_width/2,
-                            center.y() - new_height/2,
-                            new_width,
-                            new_height)
-        print "Zoom to center", self.frame
-
+        self.camera.zoom(1.0 + delta_zoom)
         self.redraw_and_update()
         
     def receive_events(self):
@@ -103,19 +120,19 @@ class PlanarWorldWidget(QWidget):
         self._properResizeEvent(event)
         
     def _properResizeEvent(self, event):
-        self.resize_frame(event.oldSize(), event.size())
+        # self.resize_frame(event.oldSize(), event.size())
         self.make_new_qimage(event.size())
         self.redraw()
 
-    def resize_frame(self, old_size, size):
-        print "Resizing frame", self.frameSize()
-        center = self.frame.center()
-        new_half_width = float(size.width())/old_size.width() * self.frame.width() / 2
-        new_half_height = float(size.height())/old_size.height() * self.frame.height() / 2
-        self.frame = QRectF(center.x() - new_half_width,
-                            center.y() - new_half_height,
-                            new_half_width * 2,
-                            new_half_height * 2)
+    # def resize_frame(self, old_size, size):
+    #     print "Resizing frame", self.frameSize()
+    #     center = self.frame.center()
+    #     new_half_width = float(size.width())/old_size.width() * self.frame.width() / 2
+    #     new_half_height = float(size.height())/old_size.height() * self.frame.height() / 2
+    #     self.frame = QRectF(center.x() - new_half_width,
+    #                         center.y() - new_half_height,
+    #                         new_half_width * 2,
+    #                         new_half_height * 2)
 
     def redraw(self):
         self.draw_a_dummy_world()
@@ -129,9 +146,10 @@ class PlanarWorldWidget(QWidget):
         self.the_qimage.fill(QtCore.Qt.white)
         p = QPainter()
         p.begin(self.the_qimage)
-        transformed_rect = linear_transform(self.frame, QRectF(self.the_qimage.rect()))(THE_BLACK_BOX)
+        transformed_rect = self.camera.to_screen(THE_BLACK_BOX,
+                                                 self.the_qimage.rect())
             
-        print "The black rect in window coords", transformed_rect, self.frame
+        # print "The black rect in window coords", transformed_rect, self.frame
         p.fillRect(transformed_rect, QtCore.Qt.black)
         p.end()
 
@@ -183,7 +201,6 @@ class PlanarWorldWidget(QWidget):
         self.action_timer.stop()
         
     def move(self, x=None, y=None):
-        ratio = self.frame.width() / self.the_qimage.width()
-        self.frame.moveTo(self.frame.x() + (x or self.the_move_x) * ratio,
-                          self.frame.y() + (y or self.the_move_y) * ratio)
+        self.camera.move((x or self.the_move_x),
+                         (y or self.the_move_y))
         self.redraw_and_update()
