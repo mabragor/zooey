@@ -256,6 +256,9 @@ class PicturesWithHolesWidget(QWidget):
 
     def refresh_the_qimage(self, color=QtCore.Qt.white):
         self.the_qimage.fill(color)
+
+    def resizeEvent(self, event):
+        self.redraw()
         
     def paintEvent(self, event):
         x = (self.frameSize().width() - self.the_qimage.width())/2

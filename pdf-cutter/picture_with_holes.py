@@ -19,21 +19,8 @@ DEFAULT_HOLE_SCALE = 4
 MAX_HOLE_DISTANCE = 2.0
 FULL_HOLE_DISTANCE = 1.1
 
-def linear_transform(src, dst):
-    zoom_x = float(dst.width())/src.width()
-    zoom_y = float(dst.height())/src.height()
+from linear_transform import linear_transform
 
-    def foo(thing):
-        if isinstance(thing, QRectF):
-            return QRectF(dst.x() + float(thing.x() - src.x()) * zoom_x,
-                          dst.y() + float(thing.y() - src.y()) * zoom_y,
-                          thing.width() * zoom_x,
-                          thing.height() * zoom_y)
-        else:
-            return QPointF(dst.x() + float(thing.x() - src.x()) * zoom_x,
-                           dst.y() + float(thing.y() - src.y()) * zoom_y)
-        
-    return foo
 
 def child_opacity(distance):
     # return 1.0
