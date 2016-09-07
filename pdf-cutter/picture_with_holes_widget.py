@@ -1,9 +1,6 @@
 ### picture_with_holes_widget.py
 ### The frontend of "pictures with holes"
 
-
-from __future__ import with_statement
-
 from PyQt4 import QtCore
 from PyQt4.QtGui import (QWidget, QPalette, QPainter, QCursor)
 

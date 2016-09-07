@@ -1,6 +1,8 @@
 ### modal_dispatcher.py
 ### The thing that handles keyboard modes dispatch for us
 
+from __future__ import with_statement
+
 from PyQt4 import QtCore
 from string import capwords
 
