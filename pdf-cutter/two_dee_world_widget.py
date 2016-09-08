@@ -20,6 +20,7 @@ FOCUS_LINE_WIDTH = 5
 NEW_BOX_ONSCREEN_SIZE = 50.0
 BOX_ZOOM_DELTA = 0.01
 BOX_MOVE_DELTA = 1
+CUTLINE_MOVE_DELTA = 0.01
 
 class Camera(object):
     def __init__(self, x = 0.0, y = 0.0, distance = 1.0):
@@ -261,11 +262,15 @@ class PlanarWorldWidget(QWidget):
                              "l" : ["move_selected_box", "right"] },
               "box_destructive_mode" : { "options" : { 'on_start' : self.box_destructive_mode_on_start,
                                                        'on_stop' : self.box_destructive_mode_on_stop },
-                                         "r" : "delete_selected_box" },
+                                         "r" : "delete_selected_box",
+                                         "i" : ["move_cutline_selected_box", "up"],
+                                         "k" : ["move_cutline_selected_box", "down"]
+                                     },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
                                                    "create_box", "focus_box_at_point",
                                                    "unfocus", "scale_selected_box",
-                                                   "delete_selected_box", "move_selected_box")
+                                                   "delete_selected_box", "move_selected_box",
+                                                   "move_cutline_selected_box")
             })
 
     def expand_action_specs(self, *specs):
@@ -538,3 +543,29 @@ class PlanarWorldWidget(QWidget):
         print "BOX DESTRUCTIVE MODE ON STOP!"
         self.planar_world._display_cutline = False
         self.redraw_and_update()
+
+    def move_cutline_selected_box_starter(self, direction):
+        if not self.planar_world._focus:
+            raise DontWannaStart
+        
+        if direction == 'up':
+            self.the_move_y = -CUTLINE_MOVE_DELTA
+        elif direction == 'down':
+            self.the_move_y = CUTLINE_MOVE_DELTA
+            
+        self.action_timer.timeout.connect(self.move_cutline_selected_box)
+        self.action_timer.start()
+
+    def move_cutline_selected_box_stopper(self, direction):
+        self.action_timer.timeout.disconnect(self.move_cutline_selected_box)
+        self.action_timer.stop()
+
+    def move_cutline_selected_box(self):
+        self.planar_world._focus.cut_line += self.the_move_y
+        if self.planar_world._focus.cut_line < 0.0:
+            self.planar_world._focus.cut_line = 0.0
+        if self.planar_world._focus.cut_line > 1.0:
+            self.planar_world._focus.cut_line = 1.0
+
+        self.redraw_and_update()
+        
