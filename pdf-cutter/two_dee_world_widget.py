@@ -18,6 +18,7 @@ MOVE_SPEED = 10
 FOCUS_LINE_WIDTH = 5
 
 NEW_BOX_ONSCREEN_SIZE = 50.0
+BOX_ZOOM_DELTA = 0.01
 
 class Camera(object):
     def __init__(self, x = 0.0, y = 0.0, distance = 1.0):
@@ -124,10 +125,13 @@ class PlanarWorld(object):
         self.objects = []
         self._focus = None
 
-    def intersects_with_something(self, box):
+    def intersects_with_something(self, box, except_box=None):
+        '''True if we intersect with anything except ourself and some 'exceptional' box'''
         for other in self.objects:
             if ((not box == other)
+                and (not except_box == other)
                 and box.intersects(other)):
+                # print "INTERSECTS WITH SOMETHING:", box, except_box, other
                 return True
         return False
         
@@ -147,10 +151,13 @@ class PlanarWorld(object):
     def focus(self, box):
         self._focus = box
     
-    def try_zoom_box(box, zoom):
-        if not self.intersects_with_something(box.nd_zoom(zoom)):
+    def try_zoom_box(self, box, zoom):
+        print "TRY ZOOM BOX: we enter"
+        if not self.intersects_with_something(box.nd_zoom(zoom), box):
             # after we've checked non-destructively everything is OK, we do destructively in-place
+            print "TRY ZOOM BOX: we do not intersect with anything"
             return box.zoom(zoom)
+        print "TRY ZOOM BOX: we intersect with something"
         # Otherwise we don't change anything
         return None
     
@@ -222,10 +229,12 @@ class PlanarWorldWidget(QWidget):
                                 "j" : ["move_cursor", "left"],
                                 "k" : ["move_cursor", "down"],
                                 "l" : ["move_cursor", "right"] },
-              "box_mode" : { "c" : "create_box" },
+              "box_mode" : { "c" : "create_box",
+                             "a" : ["scale_selected_box", "enlarge"],
+                             "z" : ["scale_selected_box", "shrink"] },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
                                                    "create_box", "focus_box_at_point",
-                                                   "unfocus")
+                                                   "unfocus", "scale_selected_box")
             })
 
     def expand_action_specs(self, *specs):
@@ -427,4 +436,27 @@ class PlanarWorldWidget(QWidget):
     def unfocus_stopper(self):
         pass
 
+    def scale_selected_box_starter(self, direction):
+        if not self.planar_world._focus:
+            raise DontWannaStart
         
+        if direction == 'enlarge':
+            self.the_zoom_delta = BOX_ZOOM_DELTA
+        elif direction == 'shrink':
+            self.the_zoom_delta = -BOX_ZOOM_DELTA
+        else:
+            raise Exception("Bad zoom direction" + str(direction))
+            
+        self.action_timer.timeout.connect(self.scale_selected_box)
+        self.action_timer.start()
+
+    def scale_selected_box_stopper(self, direction):
+        self.action_timer.timeout.disconnect(self.scale_selected_box)
+        self.action_timer.stop()
+
+    def scale_selected_box(self):
+        delta_zoom = self.the_zoom_delta
+
+        if self.planar_world.try_zoom_box(self.planar_world._focus, 1.0 + self.the_zoom_delta):
+            self.redraw_and_update()
+
