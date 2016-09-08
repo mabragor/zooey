@@ -19,6 +19,7 @@ FOCUS_LINE_WIDTH = 5
 
 NEW_BOX_ONSCREEN_SIZE = 50.0
 BOX_ZOOM_DELTA = 0.01
+BOX_MOVE_DELTA = 1
 
 class Camera(object):
     def __init__(self, x = 0.0, y = 0.0, distance = 1.0):
@@ -101,6 +102,11 @@ class ColoredBox(object):
         self._cache_valid = False
         return self
 
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        return self
+    
     def image(self):
         if (not self._cache_valid) or (self._image is None):
             self._cache_valid = True
@@ -115,6 +121,10 @@ class ColoredBox(object):
         '''ND stands for non-destructive -- creates a copy, and zooms it'''
         return self.copy().zoom(zoom)
 
+    def nd_move(self, dx, dy):
+        '''ND stands for non-destructive -- creates a copy, and zooms it'''
+        return self.copy().move(dx, dy)
+    
     def rectf(self):
         return QRectF(self.x - self.w/2, self.y - self.h/2, self.w, self.h)
     
@@ -160,6 +170,13 @@ class PlanarWorld(object):
             print "TRY ZOOM BOX: we do not intersect with anything"
             return box.zoom(zoom)
         print "TRY ZOOM BOX: we intersect with something"
+        # Otherwise we don't change anything
+        return None
+
+    def try_move_box(self, box, dx, dy):
+        if not self.intersects_with_something(box.nd_move(dx, dy), box):
+            # after we've checked non-destructively everything is OK, we do destructively in-place
+            return box.move(dx, dy)
         # Otherwise we don't change anything
         return None
     
@@ -234,12 +251,16 @@ class PlanarWorldWidget(QWidget):
               "box_mode" : { "c" : "create_box",
                              "d" : ["mode", "box_destructive_mode"],
                              "a" : ["scale_selected_box", "enlarge"],
-                             "z" : ["scale_selected_box", "shrink"] },
+                             "z" : ["scale_selected_box", "shrink"],
+                             "i" : ["move_selected_box", "up"],
+                             "j" : ["move_selected_box", "left"],
+                             "k" : ["move_selected_box", "down"],
+                             "l" : ["move_selected_box", "right"] },
               "box_destructive_mode" : { "r" : "delete_selected_box" },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
                                                    "create_box", "focus_box_at_point",
                                                    "unfocus", "scale_selected_box",
-                                                   "delete_selected_box")
+                                                   "delete_selected_box", "move_selected_box")
             })
 
     def expand_action_specs(self, *specs):
@@ -471,3 +492,27 @@ class PlanarWorldWidget(QWidget):
 
     def delete_selected_box_stopper(self):
         pass
+
+    def move_selected_box_starter(self, direction):
+        if not self.planar_world._focus:
+            raise DontWannaStart
+
+        direction_map = { 'left' : (-BOX_MOVE_DELTA, 0),
+                          'right' : (BOX_MOVE_DELTA, 0),
+                          'up' : (0, -BOX_MOVE_DELTA),
+                          'down' : (0, BOX_MOVE_DELTA) }
+        (self.the_move_x, self.the_move_y) = direction_map[direction]
+            
+        self.action_timer.timeout.connect(self.move_selected_box)
+        self.action_timer.start()
+
+    def move_selected_box_stopper(self, direction):
+        self.action_timer.timeout.disconnect(self.move_selected_box)
+        self.action_timer.stop()
+
+    def move_selected_box(self):
+        if self.planar_world.try_move_box(self.planar_world._focus,
+                                          self.the_move_x,
+                                          self.the_move_y):
+            self.redraw_and_update()
+    
