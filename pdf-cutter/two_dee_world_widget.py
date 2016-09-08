@@ -1,7 +1,7 @@
 ### 2dworld_widget.py
 ### The simple 2d world, where colored boxes (and later, more complicated objects) would live.
 
-from PyQt4 import (QtCore)
+from PyQt4 import (QtCore, QtGui)
 from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor)
 from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize)
 import time
@@ -14,6 +14,10 @@ THE_BLACK_BOX = QRectF(-50, -50, 100, 100)
 FRAME_START_RATIO = 1.0
 
 MOVE_SPEED = 10
+
+FOCUS_LINE_WIDTH = 5
+
+NEW_BOX_ONSCREEN_SIZE = 50.0
 
 class Camera(object):
     def __init__(self, x = 0.0, y = 0.0, distance = 1.0):
@@ -46,15 +50,21 @@ class Camera(object):
         if isinstance(thing, QPointF):
             pt = QPointF(self.x, self.y)
             return pt + thing * self.d/self.d0
+        if isinstance(thing, float):
+            return thing /self.d0 * self.d
+        if isinstance(thing, QRectF):
+            return QRectF(self.cam_to_abs(thing.topLeft()),
+                          QSizeF(self.cam_to_abs(thing.width()),
+                                 self.cam_to_abs(thing.height())))
+
         raise Exception("Unknown type %s" % thing)
         
 
 COLORED_BOX_INIT_SIZE = 10
 
-COLORS = ["white", "silver", "gray", "black",
-          "red", "maroon", "yellow", "olive",
-          "lime", "green", "aqua", "teal",
-          "blue", "navy", "fuchsia", "purple"]
+COLORS = ["white", "black", "red", "darkRed", "green", "darkGreen",
+          "blue", "darkBlue", "cyan", "darkCyan", "magenta", "darkMagenta",
+          "yellow", "darkYellow", "gray", "darkGray", "lightGray"]
 
 class ColoredBox(object):
     def __init__(self, x=0, y=0, w=COLORED_BOX_INIT_SIZE, h=COLORED_BOX_INIT_SIZE, color=None):
@@ -63,15 +73,18 @@ class ColoredBox(object):
         self.w = float(w)
         self.h = float(h)
         if color is None:
-            self.color = random.randint(0, 15)
+            self._color = random.randint(0, len(COLORS) - 1)
         else:
-            self.color = color
+            self._color = color
 
         self._image = None
         self._cache_valid = False
 
+    def color(self):
+        return getattr(QtCore.Qt, COLORS[self._color])
+        
     def copy(self):
-        return ColoredBox(x=self.x, y=self.y, w=self.w, h=self.h, color=self.color)
+        return ColoredBox(x=self.x, y=self.y, w=self.w, h=self.h, color=self._color)
             
     def intersects(self, other_box):
         return ((abs(self.x - other_box.x) < (self.w + other_box.w)/2)
@@ -95,7 +108,7 @@ class ColoredBox(object):
         return self._image
 
     def draw(self):
-        self._image.fill(self.color)
+        self._image.fill(self.color())
     
     def nd_zoom(self, zoom):
         '''ND stands for non-destructive -- creates a copy, and zooms it'''
@@ -118,14 +131,14 @@ class PlanarWorld(object):
                 return True
         return False
         
-    def try_create_new_box(self, x, y):
-        new_box = ColoredBox(x = x, y = y)
+    def try_create_new_box(self, x, y, size):
+        new_box = ColoredBox(x = x, y = y, w=size, h=size)
         if self.intersects_with_something(new_box):
             return None
         self.objects.append(new_box)
         return new_box
 
-    def find_box_at_point(x, y):
+    def find_box_at_point(self, x, y):
         for box in self.objects:
             if box.contains_point(x, y):
                 return box
@@ -201,7 +214,9 @@ class PlanarWorldWidget(QWidget):
                          "k" : ["move", "down"],
                          "l" : ["move", "right"],
                          "q" : ["mode", "cursor_mode"],
-                         "b" : ["mode", "box_mode"] },
+                         "b" : ["mode", "box_mode"],
+                         "f" : "focus_box_at_point",
+                         "u" : "unfocus" },
               "cursor_mode" : { "options" : ["inherit"],
                                 "i" : ["move_cursor", "up"],
                                 "j" : ["move_cursor", "left"],
@@ -209,7 +224,8 @@ class PlanarWorldWidget(QWidget):
                                 "l" : ["move_cursor", "right"] },
               "box_mode" : { "c" : "create_box" },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
-                                                   "create_box")
+                                                   "create_box", "focus_box_at_point",
+                                                   "unfocus")
             })
 
     def expand_action_specs(self, *specs):
@@ -246,13 +262,14 @@ class PlanarWorldWidget(QWidget):
         self.redraw_and_update()
 
     def create_box_starter(self):
-        pos = QCursor().pos()
-        print "CREATE BOX STARTER:", self.frameSize(), self.the_qimage.rect(), pos
-        abs_pos = self.camera.cam_to_abs(self.screen_to_cam(QPointF(self.mapFromGlobal(pos))))
-        box = self.planar_world.try_create_new_box(abs_pos.x(), abs_pos.y())
+        abs_pos = self.cursor_abs()
+        abs_size = self.camera.cam_to_abs(self.screen_to_cam(NEW_BOX_ONSCREEN_SIZE))
+        box = self.planar_world.try_create_new_box(abs_pos.x(), abs_pos.y(), abs_size)
+                                                   
         if box:
             self.planar_world.focus(box)
-        self.redraw_and_update()
+            # we only redraw if we've successfully created the box
+            self.redraw_and_update()
 
     def create_box_stopper(self):
         pass
@@ -273,16 +290,6 @@ class PlanarWorldWidget(QWidget):
         # self.resize_frame(event.oldSize(), event.size())
         self.make_new_qimage(event.size())
         self.redraw()
-
-    # def resize_frame(self, old_size, size):
-    #     print "Resizing frame", self.frameSize()
-    #     center = self.frame.center()
-    #     new_half_width = float(size.width())/old_size.width() * self.frame.width() / 2
-    #     new_half_height = float(size.height())/old_size.height() * self.frame.height() / 2
-    #     self.frame = QRectF(center.x() - new_half_width,
-    #                         center.y() - new_half_height,
-    #                         new_half_width * 2,
-    #                         new_half_height * 2)
 
     def redraw(self):
         self.draw_a_dummy_world()
@@ -391,10 +398,33 @@ class PlanarWorldWidget(QWidget):
         p = QPainter()
         p.begin(self.the_qimage)
         rect = self.cam_to_screen(self.camera.abs_to_cam(self.planar_world._focus.rectf()))
-        p.pen().setWidth(10)
-        p.pen().setColor(QtCore.Qt.yellow)
+        pen = QtGui.QPen(QtCore.Qt.yellow, FOCUS_LINE_WIDTH, QtCore.Qt.SolidLine)
+        p.setPen(pen)
         p.drawRect(rect)
         p.end()
-                                  
+
+    def cursor_abs(self):
+        pos = QCursor().pos()
+        # print "CURSOR ABS:", self.frameSize(), self.the_qimage.rect(), pos
+        return self.camera.cam_to_abs(self.screen_to_cam(QPointF(self.mapFromGlobal(pos))))
+        
+    def focus_box_at_point_starter(self):
+        abs_pos = self.cursor_abs()
+        box = self.planar_world.find_box_at_point(abs_pos.x(), abs_pos.y())
+                                                   
+        if box:
+            self.planar_world.focus(box)
+            self.redraw_and_update()
+
+    def focus_box_at_point_stopper(self):
+        pass
+
+    def unfocus_starter(self):
+        if self.planar_world._focus:
+            self.planar_world._focus = None
+            self.redraw_and_update()
+
+    def unfocus_stopper(self):
+        pass
 
         
