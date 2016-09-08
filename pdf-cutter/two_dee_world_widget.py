@@ -64,6 +64,7 @@ class Camera(object):
         
 
 COLORED_BOX_INIT_SIZE = 10
+CUT_SPLIT_MOVE = 1
 
 COLORS = ["white", "black", "red", "darkRed", "green", "darkGreen",
           "blue", "darkBlue", "cyan", "darkCyan", "magenta", "darkMagenta",
@@ -130,6 +131,17 @@ class ColoredBox(object):
     
     def rectf(self):
         return QRectF(self.x - self.w/2, self.y - self.h/2, self.w, self.h)
+
+    def cut(self):
+        y1 = self.y - self.h/2 + self.cut_line * self.h / 2
+        y2 = self.y + self.h/2 - (1.0 - self.cut_line) * self.h / 2
+
+        box1 = ColoredBox(x=self.x, y=y1, w=self.w, h=self.cut_line * self.h, color=self._color)
+        box2 = ColoredBox(x=self.x, y=y2, w=self.w, h=(1.0 - self.cut_line) * self.h, color=self._color)
+        box1.move(0, -CUT_SPLIT_MOVE)
+        box2.move(0, CUT_SPLIT_MOVE)
+
+        return (box1, box2)
     
 class PlanarWorld(object):
     '''The backend of the planar world
@@ -183,6 +195,17 @@ class PlanarWorld(object):
             return box.move(dx, dy)
         # Otherwise we don't change anything
         return None
+
+    def try_cut_box(self, box):
+        (box1, box2) = box.cut()
+        if (not self.intersects_with_something(box1, box)
+            and not self.intersects_with_something(box2, box)):
+            self.objects.remove(box)
+            self.objects.append(box1)
+            self.objects.append(box2)
+            self.unfocus()
+            return True
+        return False
     
 class PlanarWorldWidget(QWidget):
     def __init__(self):
@@ -264,13 +287,15 @@ class PlanarWorldWidget(QWidget):
                                                        'on_stop' : self.box_destructive_mode_on_stop },
                                          "r" : "delete_selected_box",
                                          "i" : ["move_cutline_selected_box", "up"],
-                                         "k" : ["move_cutline_selected_box", "down"]
+                                         "k" : ["move_cutline_selected_box", "down"],
+                                         "c" : "cut_selected_box"
                                      },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
                                                    "create_box", "focus_box_at_point",
                                                    "unfocus", "scale_selected_box",
                                                    "delete_selected_box", "move_selected_box",
-                                                   "move_cutline_selected_box")
+                                                   "move_cutline_selected_box",
+                                                   "cut_selected_box")
             })
 
     def expand_action_specs(self, *specs):
@@ -569,3 +594,13 @@ class PlanarWorldWidget(QWidget):
 
         self.redraw_and_update()
         
+    def cut_selected_box_starter(self):
+        if not self.planar_world._focus:
+            raise DontWannaStart
+
+        if self.planar_world.try_cut_box(self.planar_world._focus):
+            self.redraw_and_update()
+
+    def cut_selected_box_stopper(self):
+        pass
+
