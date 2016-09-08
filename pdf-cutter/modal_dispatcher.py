@@ -131,8 +131,9 @@ class ModalDispatcher(object):
     def unwind_mode_stack(self, key):
         self.stop_current_action()
 
+        print "UNWIND MODE STACK", self.mode_stack
         with locking_attr(self):
-            while self.mode_stack[0][1] != key:
+            while self.mode_stack[-1][1] != key:
                 self.mode_stack.pop()
             (_, _, old_mode) = self.mode_stack.pop()
             self.current_mode = old_mode

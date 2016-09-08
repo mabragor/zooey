@@ -150,7 +150,9 @@ class PlanarWorld(object):
 
     def focus(self, box):
         self._focus = box
-    
+    def unfocus(self):
+        self._focus = None
+        
     def try_zoom_box(self, box, zoom):
         print "TRY ZOOM BOX: we enter"
         if not self.intersects_with_something(box.nd_zoom(zoom), box):
@@ -230,11 +232,14 @@ class PlanarWorldWidget(QWidget):
                                 "k" : ["move_cursor", "down"],
                                 "l" : ["move_cursor", "right"] },
               "box_mode" : { "c" : "create_box",
+                             "d" : ["mode", "box_destructive_mode"],
                              "a" : ["scale_selected_box", "enlarge"],
                              "z" : ["scale_selected_box", "shrink"] },
+              "box_destructive_mode" : { "r" : "delete_selected_box" },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
                                                    "create_box", "focus_box_at_point",
-                                                   "unfocus", "scale_selected_box")
+                                                   "unfocus", "scale_selected_box",
+                                                   "delete_selected_box")
             })
 
     def expand_action_specs(self, *specs):
@@ -340,10 +345,6 @@ class PlanarWorldWidget(QWidget):
             return
         if event.key() == QtCore.Qt.Key_Escape:
             self.stop()
-            return
-        if event.key() == QtCore.Qt.Key_R:
-            self.init_frame_and_qimage()
-            self.redraw()
             return
 
         self.modal_dispatcher.press(event.key())
@@ -460,3 +461,13 @@ class PlanarWorldWidget(QWidget):
         if self.planar_world.try_zoom_box(self.planar_world._focus, 1.0 + self.the_zoom_delta):
             self.redraw_and_update()
 
+    def delete_selected_box_starter(self):
+        if not self.planar_world._focus:
+            raise DontWannaStart
+
+        self.planar_world.objects.remove(self.planar_world._focus)
+        self.planar_world.unfocus()
+        self.redraw_and_update()
+
+    def delete_selected_box_stopper(self):
+        pass
