@@ -246,7 +246,9 @@ class PlanarWorldWidget(QWidget):
         self.redraw_and_update()
 
     def create_box_starter(self):
-        abs_pos = self.camera.cam_to_abs(self.screen_to_cam(QPointF(QCursor().pos())))
+        pos = QCursor().pos()
+        print "CREATE BOX STARTER:", self.frameSize(), self.the_qimage.rect(), pos
+        abs_pos = self.camera.cam_to_abs(self.screen_to_cam(QPointF(self.mapFromGlobal(pos))))
         box = self.planar_world.try_create_new_box(abs_pos.x(), abs_pos.y())
         if box:
             self.planar_world.focus(box)
