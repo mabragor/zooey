@@ -6,6 +6,9 @@ from __future__ import with_statement
 from PyQt4 import QtCore
 from string import capwords
 
+class DontWannaStart(Exception):
+    pass
+
 KEYNAMES_EXCEPTION_TABLE = {
     "sys_req" : QtCore.Qt.Key_SysReq,
     "page_up" : QtCore.Qt.Key_PageUp,
