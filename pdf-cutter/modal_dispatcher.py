@@ -96,6 +96,8 @@ class ModalDispatcher(object):
             self.mode_stack.append([mode_name, key, self.current_mode])
             self.current_mode = Mode(self.current_mode,
                                      self.mode_descriptions[mode_name])
+            if hasattr(self.current_mode, "on_start"):
+                self.current_mode.on_start()
             print "Mode activated:", mode_name
 
     def try_start_action(self, key):
@@ -133,8 +135,13 @@ class ModalDispatcher(object):
 
         print "UNWIND MODE STACK", self.mode_stack
         with locking_attr(self):
+            if hasattr(self.current_mode, "on_stop"):
+                self.current_mode.on_stop()
+            
             while self.mode_stack[-1][1] != key:
-                self.mode_stack.pop()
+                (_, _, it) = self.mode_stack.pop()
+                if hasattr(it, "on_stop"):
+                    it.on_stop()
             (_, _, old_mode) = self.mode_stack.pop()
             self.current_mode = old_mode
 
@@ -177,6 +184,14 @@ class Mode(object):
 
         self.copy_if_inherit(old_mode, description)
 
+        options = description.get('options', {})
+        it = options.get('on_start', None)
+        if it:
+            self.on_start = it
+        it = options.get('on_stop', None)
+        if it:
+            self.on_stop = it
+
         for (key, spec) in description.iteritems():
             if key == 'options':
                 continue
@@ -191,6 +206,6 @@ class Mode(object):
         print "Modes", self.modes, "actions", self.actions
 
     def copy_if_inherit(self, old_mode, description):
-        if 'inherit' in description.get('options', []):
+        if 'inherit' in description.get('options', {}):
             self.modes = old_mode.modes.copy()
             self.actions = old_mode.actions.copy()

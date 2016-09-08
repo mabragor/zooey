@@ -79,6 +79,8 @@ class ColoredBox(object):
         else:
             self._color = color
 
+        self.cut_line = 0.5
+            
         self._image = None
         self._cache_valid = False
 
@@ -134,6 +136,7 @@ class PlanarWorld(object):
     def __init__(self):
         self.objects = []
         self._focus = None
+        self._display_cutline = False
 
     def intersects_with_something(self, box, except_box=None):
         '''True if we intersect with anything except ourself and some 'exceptional' box'''
@@ -243,7 +246,7 @@ class PlanarWorldWidget(QWidget):
                          "b" : ["mode", "box_mode"],
                          "f" : "focus_box_at_point",
                          "u" : "unfocus" },
-              "cursor_mode" : { "options" : ["inherit"],
+              "cursor_mode" : { "options" : {"inherit" : True },
                                 "i" : ["move_cursor", "up"],
                                 "j" : ["move_cursor", "left"],
                                 "k" : ["move_cursor", "down"],
@@ -256,7 +259,9 @@ class PlanarWorldWidget(QWidget):
                              "j" : ["move_selected_box", "left"],
                              "k" : ["move_selected_box", "down"],
                              "l" : ["move_selected_box", "right"] },
-              "box_destructive_mode" : { "r" : "delete_selected_box" },
+              "box_destructive_mode" : { "options" : { 'on_start' : self.box_destructive_mode_on_start,
+                                                       'on_stop' : self.box_destructive_mode_on_stop },
+                                         "r" : "delete_selected_box" },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
                                                    "create_box", "focus_box_at_point",
                                                    "unfocus", "scale_selected_box",
@@ -428,10 +433,18 @@ class PlanarWorldWidget(QWidget):
             return
         p = QPainter()
         p.begin(self.the_qimage)
+
+        # draw focus rect
         rect = self.cam_to_screen(self.camera.abs_to_cam(self.planar_world._focus.rectf()))
         pen = QtGui.QPen(QtCore.Qt.yellow, FOCUS_LINE_WIDTH, QtCore.Qt.SolidLine)
         p.setPen(pen)
         p.drawRect(rect)
+
+        if self.planar_world._display_cutline:
+            cut_line = self.planar_world._focus.cut_line
+            p.setPen(QtGui.QPen(QtCore.Qt.black, 2, QtCore.Qt.DashLine))
+            p.drawLine(rect.left(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom(),
+                       rect.right(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom())
         p.end()
 
     def cursor_abs(self):
@@ -516,3 +529,12 @@ class PlanarWorldWidget(QWidget):
                                           self.the_move_y):
             self.redraw_and_update()
     
+    def box_destructive_mode_on_start(self):
+        print "BOX DESTRUCTIVE MODE ON START!"
+        self.planar_world._display_cutline = True
+        self.redraw_and_update()
+
+    def box_destructive_mode_on_stop(self):
+        print "BOX DESTRUCTIVE MODE ON STOP!"
+        self.planar_world._display_cutline = False
+        self.redraw_and_update()
