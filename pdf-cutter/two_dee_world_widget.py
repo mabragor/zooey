@@ -3,7 +3,7 @@
 
 from PyQt4 import (QtCore, QtGui)
 from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor)
-from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize)
+from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize, QString)
 import time
 import random
 
@@ -148,7 +148,7 @@ class PlanarWorld(object):
     It knows about objects in it, it can move them around, create and so on.'''
     def __init__(self):
         self.objects = []
-        self._focus = None
+        self.init_focus_registers()
         self._display_cutline = False
 
     def intersects_with_something(self, box, except_box=None):
@@ -174,11 +174,35 @@ class PlanarWorld(object):
                 return box
         return None
 
-    def focus(self, box):
-        self._focus = box
+    def init_focus_registers(self):
+        self._focus = [None for i in xrange(0,9)]
+    
+    def focus(self, box, index=1):
+        self._focus[(index + 10 - 1) % 10] = box
+
     def unfocus(self):
-        self._focus = None
-        
+        '''Returns True if we've actually unfocused something'''
+        flag = False
+        for (i, item) in enumerate(self._focus):
+            if item is not None:
+                flag = True
+                self._focus[i] = None
+        return flag
+
+    def have_narity_focus(self, arity):
+        '''True, when we have enough or more registers populated to apply the function'''
+        j = 0
+        for item in self._focus:
+            if item is None:
+                break
+            j += 1
+            
+        return j >= arity
+
+    def get_focused(self, index):
+        # This wrapping is done for convenience of keyboard mapping
+        self._focus[(index + 10 - 1) % 10]
+    
     def try_zoom_box(self, box, zoom):
         print "TRY ZOOM BOX: we enter"
         if not self.intersects_with_something(box.nd_zoom(zoom), box):
@@ -216,6 +240,9 @@ class PlanarWorldWidget(QWidget):
         self.init_camera_and_qimage()
 
         self.planar_world = PlanarWorld()
+
+        # the optional index used by some commands
+        self.the_index = 1
         
         self.init_modal_dispatcher()
         self.init_action_timer()
@@ -259,6 +286,19 @@ class PlanarWorldWidget(QWidget):
         self.action_timer.setInterval(10)
 
     def init_modal_dispatcher(self):
+        self.pre_modal_dispatcher = ModalDispatcher(
+            { "main" : { "1" : ["select_index", 1],
+                         "2" : ["select_index", 2],
+                         "3" : ["select_index", 3],
+                         "4" : ["select_index", 4],
+                         "5" : ["select_index", 5],
+                         "6" : ["select_index", 6],
+                         "7" : ["select_index", 7],
+                         "8" : ["select_index", 8],
+                         "9" : ["select_index", 9],
+                         "0" : ["select_index", 0] },
+              "actions" : self.expand_action_specs("select_index")
+            })
         self.modal_dispatcher = ModalDispatcher(
             { "main" : { "a" : ["zoom", "in"],
                          "z" : ["zoom", "out"],
@@ -403,13 +443,20 @@ class PlanarWorldWidget(QWidget):
             self.stop()
             return
 
-        self.modal_dispatcher.press(event.key())
+        if self.pre_modal_dispatcher.press(event.key()):
+            return
+        if self.modal_dispatcher.press(event.key()):
+            return
 
     def keyReleaseEvent(self, event):
         if event.isAutoRepeat():
             return
 
-        self.modal_dispatcher.release(event.key())
+        if self.pre_modal_dispatcher.release(event.key()):
+            return 
+
+        if self.modal_dispatcher.release(event.key()):
+            return 
 
     def move_starter(self, direction):
         direction_map = { 'left' : (-MOVE_SPEED, 0),
@@ -459,24 +506,35 @@ class PlanarWorldWidget(QWidget):
         p.end()
         
     def draw_focus(self):
-        if not self.planar_world._focus:
-            return
         p = QPainter()
         p.begin(self.the_qimage)
 
-        # draw focus rect
-        rect = self.cam_to_screen(self.camera.abs_to_cam(self.planar_world._focus.rectf()))
-        pen = QtGui.QPen(QtCore.Qt.yellow, FOCUS_LINE_WIDTH, QtCore.Qt.SolidLine)
-        p.setPen(pen)
-        p.drawRect(rect)
+        for i, focused_box in enumerate(self.planar_world._focus):
+            if focused_box is None:
+                continue
+            self.draw_focus_rect(p, focused_box.rectf(), index=(i + 1)%10)
 
-        if self.planar_world._display_cutline:
-            cut_line = self.planar_world._focus.cut_line
-            p.setPen(QtGui.QPen(QtCore.Qt.black, 2, QtCore.Qt.DashLine))
-            p.drawLine(rect.left(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom(),
-                       rect.right(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom())
+            # we only draw a cutline on a box in the first register
+            if i == 0 and self.planar_world._display_cutline:
+                self.draw_cutline(p, focused_box)
         p.end()
 
+    def draw_focus_rect(self, painter, rectf, color=QtCore.Qt.yellow, index=0):
+        rect = self.cam_to_screen(self.camera.abs_to_cam(rectf))
+        painter.setPen(QtGui.QPen(color, FOCUS_LINE_WIDTH, QtCore.Qt.SolidLine))
+        painter.drawRect(rect)
+        
+        painter.setPen(QtGui.QPen(QtCore.Qt.black, FOCUS_LINE_WIDTH, QtCore.Qt.SolidLine))
+        painter.drawText(rect.bottomRight(), QString(str(index)))
+
+    def draw_cutline(self, painter, box, color=QtCore.Qt.black):
+        cut_line = box.cut_line
+        rect = self.cam_to_screen(self.camera.abs_to_cam(box.rectf()))
+        p.setPen(QtGui.QPen(color, 2, QtCore.Qt.DashLine))
+        p.drawLine(rect.left(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom(),
+                   rect.right(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom())
+
+        
     def cursor_abs(self):
         pos = QCursor().pos()
         # print "CURSOR ABS:", self.frameSize(), self.the_qimage.rect(), pos
@@ -487,22 +545,21 @@ class PlanarWorldWidget(QWidget):
         box = self.planar_world.find_box_at_point(abs_pos.x(), abs_pos.y())
                                                    
         if box:
-            self.planar_world.focus(box)
+            self.planar_world.focus(box, self.the_index)
             self.redraw_and_update()
 
     def focus_box_at_point_stopper(self):
         pass
 
     def unfocus_starter(self):
-        if self.planar_world._focus:
-            self.planar_world._focus = None
+        if self.planar_world.unfocus():
             self.redraw_and_update()
 
     def unfocus_stopper(self):
         pass
 
     def scale_selected_box_starter(self, direction):
-        if not self.planar_world._focus:
+        if not self.planar_world.have_narity_focus(1):
             raise DontWannaStart
         
         if direction == 'enlarge':
@@ -522,14 +579,14 @@ class PlanarWorldWidget(QWidget):
     def scale_selected_box(self):
         delta_zoom = self.the_zoom_delta
 
-        if self.planar_world.try_zoom_box(self.planar_world._focus, 1.0 + self.the_zoom_delta):
+        if self.planar_world.try_zoom_box(self.planar_world.get_focused(1), 1.0 + self.the_zoom_delta):
             self.redraw_and_update()
 
     def delete_selected_box_starter(self):
-        if not self.planar_world._focus:
+        if not self.planar_world.have_narity_focus(1):
             raise DontWannaStart
 
-        self.planar_world.objects.remove(self.planar_world._focus)
+        self.planar_world.objects.remove(self.planar_world.get_focused(1))
         self.planar_world.unfocus()
         self.redraw_and_update()
 
@@ -537,7 +594,7 @@ class PlanarWorldWidget(QWidget):
         pass
 
     def move_selected_box_starter(self, direction):
-        if not self.planar_world._focus:
+        if not self.planar_world.have_narity_focus(1):
             raise DontWannaStart
 
         direction_map = { 'left' : (-BOX_MOVE_DELTA, 0),
@@ -554,7 +611,7 @@ class PlanarWorldWidget(QWidget):
         self.action_timer.stop()
 
     def move_selected_box(self):
-        if self.planar_world.try_move_box(self.planar_world._focus,
+        if self.planar_world.try_move_box(self.planar_world.get_focused(1),
                                           self.the_move_x,
                                           self.the_move_y):
             self.redraw_and_update()
@@ -570,7 +627,7 @@ class PlanarWorldWidget(QWidget):
         self.redraw_and_update()
 
     def move_cutline_selected_box_starter(self, direction):
-        if not self.planar_world._focus:
+        if not self.planar_world.have_narity_focus(1):
             raise DontWannaStart
         
         if direction == 'up':
@@ -586,21 +643,29 @@ class PlanarWorldWidget(QWidget):
         self.action_timer.stop()
 
     def move_cutline_selected_box(self):
-        self.planar_world._focus.cut_line += self.the_move_y
-        if self.planar_world._focus.cut_line < 0.0:
-            self.planar_world._focus.cut_line = 0.0
-        if self.planar_world._focus.cut_line > 1.0:
-            self.planar_world._focus.cut_line = 1.0
+        focused_box = self.planar_world.get_focused(1)
+        focused_box.cut_line += self.the_move_y
+        if focused_box.cut_line < 0.0:
+            focused_box.cut_line = 0.0
+        if focused_box.cut_line > 1.0:
+            focused_box.cut_line = 1.0
 
         self.redraw_and_update()
         
     def cut_selected_box_starter(self):
-        if not self.planar_world._focus:
+        if not self.planar_world.have_narity_focus(1):
             raise DontWannaStart
 
-        if self.planar_world.try_cut_box(self.planar_world._focus):
+        if self.planar_world.try_cut_box(self.planar_world.get_focused(1)):
             self.redraw_and_update()
 
     def cut_selected_box_stopper(self):
         pass
 
+    def select_index_starter(self, index):
+        self.the_index = index
+
+    def select_index_stopper(self, index):
+        self.the_index = 1
+
+        

@@ -74,10 +74,14 @@ class ModalDispatcher(object):
         return self.action_stoppers[name]
     
     def press(self, key):
+        '''Returns true if the key is handled (no matter, successfully or not, by this modal dispatcher'''
         if self.mode_key_p(key):
             self.try_activate_mode(key)
+            return True
         elif self.action_key_p(key):
             self.try_start_action(key)
+            return True
+        return False
 
     def mode_key_p(self, key):
         return self.current_mode.modes.has_key(key)
@@ -120,10 +124,14 @@ class ModalDispatcher(object):
             self.action = action_name_and_args
 
     def release(self, key):
+        '''Returns true, if key is handled by this modal dispatcher, no matter successfully or not'''
         if self.mode_in_stack_key_p(key):
             self.unwind_mode_stack(key)
+            return True
         elif self.action_key_p(key):
             self.try_stop_action(key)
+            return True
+        return False
 
     def mode_in_stack_key_p(self, key):
         lst = filter(lambda x: x[1] == key,
