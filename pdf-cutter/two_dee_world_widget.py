@@ -175,9 +175,17 @@ class PlanarWorld(object):
         return None
 
     def init_focus_registers(self):
-        self._focus = [None for i in xrange(0,9)]
+        self._focus = [None for i in xrange(0,10)]
     
     def focus(self, box, index=1):
+        # first we unfocus the box if it's already focused
+        try:
+            i = self._focus.index(box)
+            self._focus[i] = None
+        except ValueError:
+            pass
+
+        # and then we focus it under a new register
         self._focus[(index + 10 - 1) % 10] = box
 
     def unfocus(self):
@@ -201,7 +209,8 @@ class PlanarWorld(object):
 
     def get_focused(self, index):
         # This wrapping is done for convenience of keyboard mapping
-        self._focus[(index + 10 - 1) % 10]
+        print "GET FOCUSED", self._focus
+        return self._focus[(index + 10 - 1) % 10]
     
     def try_zoom_box(self, box, zoom):
         print "TRY ZOOM BOX: we enter"
@@ -228,6 +237,8 @@ class PlanarWorld(object):
             self.objects.append(box1)
             self.objects.append(box2)
             self.unfocus()
+            self.focus(box1, 1)
+            self.focus(box2, 2)
             return True
         return False
     
@@ -530,9 +541,9 @@ class PlanarWorldWidget(QWidget):
     def draw_cutline(self, painter, box, color=QtCore.Qt.black):
         cut_line = box.cut_line
         rect = self.cam_to_screen(self.camera.abs_to_cam(box.rectf()))
-        p.setPen(QtGui.QPen(color, 2, QtCore.Qt.DashLine))
-        p.drawLine(rect.left(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom(),
-                   rect.right(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom())
+        painter.setPen(QtGui.QPen(color, 2, QtCore.Qt.DashLine))
+        painter.drawLine(rect.left(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom(),
+                         rect.right(), (1.0 - cut_line) * rect.top() + cut_line * rect.bottom())
 
         
     def cursor_abs(self):
