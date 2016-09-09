@@ -142,6 +142,19 @@ class ColoredBox(object):
         box2.move(0, CUT_SPLIT_MOVE)
 
         return (box1, box2)
+
+    def glue(self, other_box):
+        '''New box center is at the center of mass. Width is an average. Height is so that mass is preserved'''
+        mean_width = (self.w + other_box.w)/2
+        area1 = self.w * self.h
+        area2 = other_box.w * other_box.h
+        new_height1 = area1 / mean_width
+        new_height2 = area2 / mean_width
+        return ColoredBox(x = (area1 * self.x + area2 * other_box.x)/(area1+area2),
+                          y = (area1 * self.y + area2 * other_box.y)/(area1+area2),
+                          w = mean_width,
+                          h = new_height1 + new_height2,
+                          color = (self._color + other_box._color)/2)
     
 class PlanarWorld(object):
     '''The backend of the planar world
@@ -151,11 +164,11 @@ class PlanarWorld(object):
         self.init_focus_registers()
         self._display_cutline = False
 
-    def intersects_with_something(self, box, except_box=None):
+    def intersects_with_something(self, box, *except_boxes):
         '''True if we intersect with anything except ourself and some 'exceptional' box'''
         for other in self.objects:
             if ((not box == other)
-                and (not except_box == other)
+                and (other not in except_boxes)
                 and box.intersects(other)):
                 # print "INTERSECTS WITH SOMETHING:", box, except_box, other
                 return True
@@ -239,6 +252,17 @@ class PlanarWorld(object):
             self.unfocus()
             self.focus(box1, 1)
             self.focus(box2, 2)
+            return True
+        return False
+
+    def try_glue_boxes(self, box1, box2):
+        new_box = box1.glue(box2)
+        if not self.intersects_with_something(new_box, box1, box2):
+            self.objects.remove(box1)
+            self.objects.remove(box2)
+            self.objects.append(new_box)
+            self.unfocus()
+            self.focus(new_box, 1)
             return True
         return False
     
@@ -339,14 +363,15 @@ class PlanarWorldWidget(QWidget):
                                          "r" : "delete_selected_box",
                                          "i" : ["move_cutline_selected_box", "up"],
                                          "k" : ["move_cutline_selected_box", "down"],
-                                         "c" : "cut_selected_box"
+                                         "c" : "cut_selected_box",
+                                         "g" : "glue_selected_boxes"
                                      },
               "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
                                                    "create_box", "focus_box_at_point",
                                                    "unfocus", "scale_selected_box",
                                                    "delete_selected_box", "move_selected_box",
                                                    "move_cutline_selected_box",
-                                                   "cut_selected_box")
+                                                   "cut_selected_box", "glue_selected_boxes")
             })
 
     def expand_action_specs(self, *specs):
@@ -679,4 +704,14 @@ class PlanarWorldWidget(QWidget):
     def select_index_stopper(self, index):
         self.the_index = 1
 
+    def glue_selected_boxes_starter(self):
+        if not self.planar_world.have_narity_focus(2):
+            raise DontWannaStart
+
+        if self.planar_world.try_glue_boxes(self.planar_world.get_focused(1),
+                                            self.planar_world.get_focused(2)):
+            self.redraw_and_update()
+
+    def glue_selected_boxes_stopper(self):
+        pass
         
