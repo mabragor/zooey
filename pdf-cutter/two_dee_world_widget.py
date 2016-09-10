@@ -150,11 +150,19 @@ class ScaleSelectedBox(Action):
         else:
             raise Exception("Bad scale direction" + str(direction))
 
+        if world.the_index == 9:
+            self.scaling_type = 'width'
+        elif world.the_index == 0:
+            self.scaling_type = 'height'
+        else:
+            self.scaling_type = 'zoom'
+        
         super(ScaleSelectedBox, self).__init__(world)
 
     def body(self):
         if self.world.planar_world.try_zoom_box(self.world.planar_world.get_focused(1),
-                                                1.0 + self.zoom_delta):
+                                                1.0 + self.zoom_delta,
+                                                scaling_type=self.scaling_type):
             self.world.redraw_and_update()
 
         
@@ -289,9 +297,17 @@ class ColoredBox(object):
         return (abs(self.x - x) < self.w/2
                 and abs(self.y - y) < self.h/2)
     
-    def zoom(self, zoom):
-        self.w *= zoom
-        self.h *= zoom
+    def zoom(self, zoom, scaling_type='zoom'):
+        if scaling_type == 'height':
+            self.h *= zoom
+        elif scaling_type == 'width':
+            self.w *= zoom
+        elif scaling_type == 'zoom':
+            self.w *= zoom
+            self.h *= zoom
+        else:
+            raise Exception("Unexpected scaling type: %s" % scaling_type)
+
         self._cache_valid = False
         return self
 
@@ -310,9 +326,9 @@ class ColoredBox(object):
     def draw(self):
         self._image.fill(self.color())
     
-    def nd_zoom(self, zoom):
+    def nd_zoom(self, zoom, scaling_type='zoom'):
         '''ND stands for non-destructive -- creates a copy, and zooms it'''
-        return self.copy().zoom(zoom)
+        return self.copy().zoom(zoom, scaling_type=scaling_type)
 
     def nd_move(self, dx, dy):
         '''ND stands for non-destructive -- creates a copy, and zooms it'''
@@ -414,13 +430,13 @@ class PlanarWorld(object):
         print "GET FOCUSED", self._focus
         return self._focus[(index + 10 - 1) % 10]
     
-    def try_zoom_box(self, box, zoom):
-        print "TRY ZOOM BOX: we enter"
-        if not self.intersects_with_something(box.nd_zoom(zoom), box):
+    def try_zoom_box(self, box, zoom, scaling_type='zoom'):
+        # print "TRY ZOOM BOX: we enter"
+        if not self.intersects_with_something(box.nd_zoom(zoom, scaling_type=scaling_type), box):
             # after we've checked non-destructively everything is OK, we do destructively in-place
-            print "TRY ZOOM BOX: we do not intersect with anything"
-            return box.zoom(zoom)
-        print "TRY ZOOM BOX: we intersect with something"
+            # print "TRY ZOOM BOX: we do not intersect with anything"
+            return box.zoom(zoom, scaling_type=scaling_type)
+        # print "TRY ZOOM BOX: we intersect with something"
         # Otherwise we don't change anything
         return None
 
