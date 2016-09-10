@@ -5,6 +5,7 @@ from __future__ import with_statement
 
 from PyQt4 import QtCore
 from string import capwords
+import types
 
 class DontWannaStart(Exception):
     pass
@@ -48,17 +49,18 @@ def qt_key_from_string(key):
     return getattr(QtCore.Qt, "Key_" + capwords(key, "_"))
 
 class ModalDispatcher(object):
-    def __init__(self, keymap_description):
+    def __init__(self, widget, keymap_description):
+        self.widget = widget
         self.parse_keymap_description(keymap_description)
 
     def parse_keymap_description(self, keymap_description):
-        # first we list all the available actions
-        actions = keymap_description["actions"]
-        self.action_starters = {}
-        self.action_stoppers = {}
-        for action in actions:
-            self.action_starters[action[0]] = action[1]
-            self.action_stoppers[action[0]] = action[2]
+        # # first we list all the available actions
+        # actions = keymap_description["actions"]
+        # self.action_starters = {}
+        # self.action_stoppers = {}
+        # for action in actions:
+        #     self.action_starters[action[0]] = action[1]
+        #     self.action_stoppers[action[0]] = action[2]
 
         self.mode_descriptions = keymap_description.copy()
         self.mode_descriptions.pop("actions", None)
@@ -67,11 +69,11 @@ class ModalDispatcher(object):
         self.current_mode = Mode(None, self.mode_descriptions['main'])
         self.action = None
         
-    def action_starter(self, name):
-        return self.action_starters[name]
+    # def action_starter(self, name):
+    #     return self.action_starters[name]
 
-    def action_stopper(self, name):
-        return self.action_stoppers[name]
+    # def action_stopper(self, name):
+    #     return self.action_stoppers[name]
     
     def press(self, key):
         '''Returns true if the key is handled (no matter, successfully or not, by this modal dispatcher'''
@@ -110,18 +112,25 @@ class ModalDispatcher(object):
             return
 
         self.action = 'lock'
-        action_name_and_args = self.current_mode.actions[key]
+        action_object_and_args = self.current_mode.actions[key]
+        action_object = action_object_and_args[0]
+        action_args = action_object_and_args[1:]
+        action_instance = None
         try:
-            apply(self.action_starter(action_name_and_args[0]),
-                  action_name_and_args[1:])
+            if type(action_object) == types.TypeType:
+                action_instance = apply(action_object, [self.widget] + action_args)
+                action_instance.on_start()
+                # the point here is that self.action completely describes which action is performed
+                self.action = [action_instance] + action_args
+            elif type(action_object) == types.FunctionType:
+                apply(action_object, [self.widget] + action_args)
+                self.action = action_object_and_args
         except DontWannaStart:
             print "Got dont wanna start"
             self.action = None
         except Exception:
             self.action = None
             raise
-        else:
-            self.action = action_name_and_args
 
     def release(self, key):
         '''Returns true, if key is handled by this modal dispatcher, no matter successfully or not'''
@@ -159,15 +168,21 @@ class ModalDispatcher(object):
 
         action = self.action
         self.action = 'lock'
-        apply(self.action_stopper(action[0]), action[1:])
+        if type(action[0]) == types.FunctionType:
+            pass
+        else:
+            action[0].on_stop()
         self.action = None
 
     def try_stop_action(self, key):
         if self.action is None:
-            return
+            return None
 
-        if self.action == self.current_mode.actions[key]:
-            self.stop_current_action()
+        key_action = self.current_mode.actions[key]
+        if self.action[1:] == key_action[1:]:
+            if ((type(self.action[0]) == types.FunctionType and self.action[0] == key_action[0])
+                or (type(self.action[0]) == key_action[0])):
+                self.stop_current_action()
             
 def locking_attr(x, attr_name="action", value_after=None):
     class Frob(object):
@@ -204,7 +219,7 @@ class Mode(object):
             if key == 'options':
                 continue
             
-            if isinstance(spec, basestring):
+            if not type(spec) == types.ListType:
                 spec = [spec]
 
             if spec[0] == 'mode':

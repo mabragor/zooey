@@ -22,6 +22,193 @@ BOX_ZOOM_DELTA = 0.01
 BOX_MOVE_DELTA = 1
 CUTLINE_MOVE_DELTA = 0.01
 
+class Action(object):
+    def __init__(self, world, interval = 10):
+        self.world = world
+        self.init_timer(interval)
+
+    def init_timer(self, interval):
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(interval)
+        self.timer.timeout.connect(self.body)
+
+    def on_start(self):
+        self.timer.start()
+
+    def on_stop(self):
+        self.timer.stop()
+
+    def body(self):
+        pass
+
+class OneshotAction(Action):
+    '''For this action all the logic is supposed to go to init and on_stop'''
+    def __init__(self, world):
+        self.world = world
+    def on_start(self):
+        pass
+    def on_stop(self):
+        pass
+    def body(self):
+        pass
+    
+class ZoomCamera(Action):
+    def __init__(self, world, direction):
+        if direction == 'in':
+            self.zoom_delta = 0.01
+        elif direction == 'out':
+            self.zoom_delta = -0.01
+        else:
+            raise Exception("Bad zoom direction" + str(direction))
+        super(ZoomCamera, self).__init__(world)
+
+    def body(self):
+        self.world.camera.zoom(1.0 + self.zoom_delta)
+        self.world.redraw_and_update()
+
+def glue_selected_boxes(world):
+    if not world.planar_world.have_narity_focus(2):
+        raise DontWannaStart
+
+    if world.planar_world.try_glue_boxes(world.planar_world.get_focused(1),
+                                         world.planar_world.get_focused(2)):
+        world.redraw_and_update()
+
+class SelectIndex(OneshotAction):
+    def __init__(self, world, index):
+        world.the_index = index
+        super(SelectIndex, self).__init__(world)
+
+    def on_stop(self):
+        self.world.the_index = 1
+
+def cut_selected_box(world):
+    if not world.planar_world.have_narity_focus(1):
+        raise DontWannaStart
+
+    if world.planar_world.try_cut_box(world.planar_world.get_focused(1)):
+        world.redraw_and_update()
+
+class MoveCutlineSelectedBox(Action):
+    def __init__(self, world, direction):
+        if not world.planar_world.have_narity_focus(1):
+            raise DontWannaStart
+        
+        if direction == 'up':
+            self.move_y = -CUTLINE_MOVE_DELTA
+        elif direction == 'down':
+            self.move_y = CUTLINE_MOVE_DELTA
+        else:
+            raise Exception("Bad move cutline direction" + str(direction))
+        super(MoveCutlineSelectedBox, self).__init__(world)
+
+    def body(self):
+        focused_box = self.world.planar_world.get_focused(1)
+        focused_box.cut_line += self.move_y
+        if focused_box.cut_line < 0.0:
+            focused_box.cut_line = 0.0
+        if focused_box.cut_line > 1.0:
+            focused_box.cut_line = 1.0
+
+        self.world.redraw_and_update()
+
+class MoveSelectedBox(Action):
+    def __init__(self, world, direction):
+        if not world.planar_world.have_narity_focus(1):
+            raise DontWannaStart
+
+        direction_map = { 'left' : (-BOX_MOVE_DELTA, 0),
+                          'right' : (BOX_MOVE_DELTA, 0),
+                          'up' : (0, -BOX_MOVE_DELTA),
+                          'down' : (0, BOX_MOVE_DELTA) }
+        (self.move_x, self.move_y) = direction_map[direction]
+        super(MoveSelectedBox, self).__init__(world)
+
+    def body(self):
+        if self.world.planar_world.try_move_box(self.world.planar_world.get_focused(1),
+                                                self.move_x,
+                                                self.move_y):
+            self.world.redraw_and_update()
+
+def delete_selected_box(world):
+    if not world.planar_world.have_narity_focus(1):
+        raise DontWannaStart
+
+    world.planar_world.objects.remove(world.planar_world.get_focused(1))
+    world.planar_world.unfocus()
+    world.redraw_and_update()
+
+class ScaleSelectedBox(Action):
+    def __init__(self, world, direction):
+        if not world.planar_world.have_narity_focus(1):
+            raise DontWannaStart
+        
+        if direction == 'enlarge':
+            self.zoom_delta = BOX_ZOOM_DELTA
+        elif direction == 'shrink':
+            self.zoom_delta = -BOX_ZOOM_DELTA
+        else:
+            raise Exception("Bad scale direction" + str(direction))
+
+        super(ScaleSelectedBox, self).__init__(world)
+
+    def body(self):
+        if self.world.planar_world.try_zoom_box(self.world.planar_world.get_focused(1),
+                                                1.0 + self.zoom_delta):
+            self.world.redraw_and_update()
+
+        
+def unfocus_everything(world):
+    if world.planar_world.unfocus():
+        world.redraw_and_update()
+    
+def focus_box_at_point(world):
+    abs_pos = world.cursor_abs()
+    box = world.planar_world.find_box_at_point(abs_pos.x(), abs_pos.y())
+                                                   
+    if box:
+        world.planar_world.focus(box, world.the_index)
+        world.redraw_and_update()
+
+class MoveCursor(Action):
+    def __init__(self, world, direction):
+        direction_map = { 'left' : (-MOVE_SPEED, 0),
+                          'right' : (MOVE_SPEED, 0),
+                          'up' : (0, -MOVE_SPEED),
+                          'down' : (0, MOVE_SPEED) }
+        (self.move_x, self.move_y) = direction_map[direction]
+        super(MoveCursor, self).__init__(world)
+
+    def body(self):
+        pos = QCursor().pos()
+        QCursor().setPos(pos.x() + self.move_x,
+                         pos.y() + self.move_y)
+
+class MoveCamera(Action):
+    def __init__(self, world, direction):
+        direction_map = { 'left' : (-MOVE_SPEED, 0),
+                          'right' : (MOVE_SPEED, 0),
+                          'up' : (0, -MOVE_SPEED),
+                          'down' : (0, MOVE_SPEED) }
+        (self.move_x, self.move_y) = direction_map[direction]
+        super(MoveCamera, self).__init__(world)
+        
+    def body(self):
+        self.world.camera.move(self.move_x, self.move_y)
+        self.world.redraw_and_update()
+
+def create_box(world):
+    abs_pos = world.cursor_abs()
+    abs_size = world.camera.cam_to_abs(world.screen_to_cam(NEW_BOX_ONSCREEN_SIZE))
+    box = world.planar_world.try_create_new_box(abs_pos.x(), abs_pos.y(), abs_size)
+                                                   
+    if box:
+        world.planar_world.focus(box)
+        # we only redraw if we've successfully created the box
+        world.redraw_and_update()
+        
+
+        
 class Camera(object):
     def __init__(self, x = 0.0, y = 0.0, distance = 1.0):
         self.x = x
@@ -61,8 +248,10 @@ class Camera(object):
                                  self.cam_to_abs(thing.height())))
 
         raise Exception("Unknown type %s" % thing)
-        
 
+        
+        
+    
 COLORED_BOX_INIT_SIZE = 10
 CUT_SPLIT_MOVE = 1
 
@@ -280,7 +469,6 @@ class PlanarWorldWidget(QWidget):
         self.the_index = 1
         
         self.init_modal_dispatcher()
-        self.init_action_timer()
         self.receive_events()
 
     def init_camera_and_qimage(self):
@@ -316,62 +504,60 @@ class PlanarWorldWidget(QWidget):
         raise Exception("Unknown type %s" % thing)
 
 
-    def init_action_timer(self):
-        self.action_timer = QtCore.QTimer()
-        self.action_timer.setInterval(10)
-
     def init_modal_dispatcher(self):
         self.pre_modal_dispatcher = ModalDispatcher(
-            { "main" : { "1" : ["select_index", 1],
-                         "2" : ["select_index", 2],
-                         "3" : ["select_index", 3],
-                         "4" : ["select_index", 4],
-                         "5" : ["select_index", 5],
-                         "6" : ["select_index", 6],
-                         "7" : ["select_index", 7],
-                         "8" : ["select_index", 8],
-                         "9" : ["select_index", 9],
-                         "0" : ["select_index", 0] },
-              "actions" : self.expand_action_specs("select_index")
+            self,
+            { "main" : { "1" : [SelectIndex, 1],
+                         "2" : [SelectIndex, 2],
+                         "3" : [SelectIndex, 3],
+                         "4" : [SelectIndex, 4],
+                         "5" : [SelectIndex, 5],
+                         "6" : [SelectIndex, 6],
+                         "7" : [SelectIndex, 7],
+                         "8" : [SelectIndex, 8],
+                         "9" : [SelectIndex, 9],
+                         "0" : [SelectIndex, 0] },
+              # "actions" : self.expand_action_specs("select_index")
             })
         self.modal_dispatcher = ModalDispatcher(
-            { "main" : { "a" : ["zoom", "in"],
-                         "z" : ["zoom", "out"],
-                         "i" : ["move", "up"],
-                         "j" : ["move", "left"],
-                         "k" : ["move", "down"],
-                         "l" : ["move", "right"],
+            self,
+            { "main" : { "a" : [ZoomCamera, "in"],
+                         "z" : [ZoomCamera, "out"],
+                         "i" : [MoveCamera, "up"],
+                         "j" : [MoveCamera, "left"],
+                         "k" : [MoveCamera, "down"],
+                         "l" : [MoveCamera, "right"],
                          "q" : ["mode", "cursor_mode"],
                          "b" : ["mode", "box_mode"],
-                         "f" : "focus_box_at_point",
-                         "u" : "unfocus" },
+                         "f" : focus_box_at_point,
+                         "u" : unfocus_everything },
               "cursor_mode" : { "options" : {"inherit" : True },
-                                "i" : ["move_cursor", "up"],
-                                "j" : ["move_cursor", "left"],
-                                "k" : ["move_cursor", "down"],
-                                "l" : ["move_cursor", "right"] },
-              "box_mode" : { "c" : "create_box",
+                                "i" : [MoveCursor, "up"],
+                                "j" : [MoveCursor, "left"],
+                                "k" : [MoveCursor, "down"],
+                                "l" : [MoveCursor, "right"] },
+              "box_mode" : { "c" : create_box,
                              "d" : ["mode", "box_destructive_mode"],
-                             "a" : ["scale_selected_box", "enlarge"],
-                             "z" : ["scale_selected_box", "shrink"],
-                             "i" : ["move_selected_box", "up"],
-                             "j" : ["move_selected_box", "left"],
-                             "k" : ["move_selected_box", "down"],
-                             "l" : ["move_selected_box", "right"] },
+                             "a" : [ScaleSelectedBox, "enlarge"],
+                             "z" : [ScaleSelectedBox, "shrink"],
+                             "i" : [MoveSelectedBox, "up"],
+                             "j" : [MoveSelectedBox, "left"],
+                             "k" : [MoveSelectedBox, "down"],
+                             "l" : [MoveSelectedBox, "right"] },
               "box_destructive_mode" : { "options" : { 'on_start' : self.box_destructive_mode_on_start,
                                                        'on_stop' : self.box_destructive_mode_on_stop },
-                                         "r" : "delete_selected_box",
-                                         "i" : ["move_cutline_selected_box", "up"],
-                                         "k" : ["move_cutline_selected_box", "down"],
-                                         "c" : "cut_selected_box",
-                                         "g" : "glue_selected_boxes"
+                                         "r" : delete_selected_box,
+                                         "i" : [MoveCutlineSelectedBox, "up"],
+                                         "k" : [MoveCutlineSelectedBox, "down"],
+                                         "c" : cut_selected_box,
+                                         "g" : glue_selected_boxes
                                      },
-              "actions" : self.expand_action_specs("zoom", "move", "move_cursor",
-                                                   "create_box", "focus_box_at_point",
-                                                   "unfocus", "scale_selected_box",
-                                                   "delete_selected_box", "move_selected_box",
-                                                   "move_cutline_selected_box",
-                                                   "cut_selected_box", "glue_selected_boxes")
+              # "actions" : self.expand_action_specs("zoom_camera", "move", "move_cursor",
+              #                                      "create_box", "focus_box_at_point",
+              #                                      "unfocus", "scale_selected_box",
+              #                                      "delete_selected_box", "move_selected_box",
+              #                                      "move_cutline_selected_box",
+              #                                      "cut_selected_box", "glue_selected_boxes")
             })
 
     def expand_action_specs(self, *specs):
@@ -385,41 +571,6 @@ class PlanarWorldWidget(QWidget):
                         
         return map(expand_one_spec, specs)
 
-    def zoom_starter(self, direction):
-        if direction == 'in':
-            self.the_zoom_delta = 0.01
-        elif direction == 'out':
-            self.the_zoom_delta = -0.01
-        else:
-            raise Exception("Bad zoom direction" + str(direction))
-            
-        self.action_timer.timeout.connect(self.zoom_to_center)
-        self.action_timer.start()
-
-    def zoom_stopper(self, direction):
-        self.action_timer.timeout.disconnect(self.zoom_to_center)
-        self.action_timer.stop()
-
-    def zoom_to_center(self, delta_zoom=None):
-        if not delta_zoom:
-            delta_zoom = self.the_zoom_delta
-
-        self.camera.zoom(1.0 + delta_zoom)
-        self.redraw_and_update()
-
-    def create_box_starter(self):
-        abs_pos = self.cursor_abs()
-        abs_size = self.camera.cam_to_abs(self.screen_to_cam(NEW_BOX_ONSCREEN_SIZE))
-        box = self.planar_world.try_create_new_box(abs_pos.x(), abs_pos.y(), abs_size)
-                                                   
-        if box:
-            self.planar_world.focus(box)
-            # we only redraw if we've successfully created the box
-            self.redraw_and_update()
-
-    def create_box_stopper(self):
-        pass
-        
     def receive_events(self):
         self.events_are_accepted = True
     def ignore_events(self):
@@ -494,43 +645,6 @@ class PlanarWorldWidget(QWidget):
         if self.modal_dispatcher.release(event.key()):
             return 
 
-    def move_starter(self, direction):
-        direction_map = { 'left' : (-MOVE_SPEED, 0),
-                          'right' : (MOVE_SPEED, 0),
-                          'up' : (0, -MOVE_SPEED),
-                          'down' : (0, MOVE_SPEED) }
-        (self.the_move_x, self.the_move_y) = direction_map[direction]
-        self.action_timer.timeout.connect(self.move)
-        self.action_timer.start()
-    
-    def move_stopper(self, direction):
-        self.action_timer.timeout.disconnect(self.move)
-        self.action_timer.stop()
-        
-    def move(self, x=None, y=None):
-        self.camera.move((x or self.the_move_x),
-                         (y or self.the_move_y))
-        self.redraw_and_update()
-
-    def move_cursor_starter(self, direction):
-        direction_map = { 'left' : (-MOVE_SPEED, 0),
-                          'right' : (MOVE_SPEED, 0),
-                          'up' : (0, -MOVE_SPEED),
-                          'down' : (0, MOVE_SPEED) }
-        (self.the_move_x, self.the_move_y) = direction_map[direction]
-        self.action_timer.timeout.connect(self.move_cursor)
-        self.action_timer.start()
-    
-    def move_cursor_stopper(self, direction):
-        self.action_timer.timeout.disconnect(self.move_cursor)
-        self.action_timer.stop()
-
-    def move_cursor(self, x=None, y=None):
-        print "I'm moving cursor!"
-        pos = QCursor().pos()
-        QCursor().setPos(pos.x() + (x or self.the_move_x),
-                         pos.y() + (y or self.the_move_y))
-    
     def draw_boxes(self):
         p = QPainter()
         p.begin(self.the_qimage)
@@ -576,82 +690,6 @@ class PlanarWorldWidget(QWidget):
         # print "CURSOR ABS:", self.frameSize(), self.the_qimage.rect(), pos
         return self.camera.cam_to_abs(self.screen_to_cam(QPointF(self.mapFromGlobal(pos))))
         
-    def focus_box_at_point_starter(self):
-        abs_pos = self.cursor_abs()
-        box = self.planar_world.find_box_at_point(abs_pos.x(), abs_pos.y())
-                                                   
-        if box:
-            self.planar_world.focus(box, self.the_index)
-            self.redraw_and_update()
-
-    def focus_box_at_point_stopper(self):
-        pass
-
-    def unfocus_starter(self):
-        if self.planar_world.unfocus():
-            self.redraw_and_update()
-
-    def unfocus_stopper(self):
-        pass
-
-    def scale_selected_box_starter(self, direction):
-        if not self.planar_world.have_narity_focus(1):
-            raise DontWannaStart
-        
-        if direction == 'enlarge':
-            self.the_zoom_delta = BOX_ZOOM_DELTA
-        elif direction == 'shrink':
-            self.the_zoom_delta = -BOX_ZOOM_DELTA
-        else:
-            raise Exception("Bad zoom direction" + str(direction))
-            
-        self.action_timer.timeout.connect(self.scale_selected_box)
-        self.action_timer.start()
-
-    def scale_selected_box_stopper(self, direction):
-        self.action_timer.timeout.disconnect(self.scale_selected_box)
-        self.action_timer.stop()
-
-    def scale_selected_box(self):
-        delta_zoom = self.the_zoom_delta
-
-        if self.planar_world.try_zoom_box(self.planar_world.get_focused(1), 1.0 + self.the_zoom_delta):
-            self.redraw_and_update()
-
-    def delete_selected_box_starter(self):
-        if not self.planar_world.have_narity_focus(1):
-            raise DontWannaStart
-
-        self.planar_world.objects.remove(self.planar_world.get_focused(1))
-        self.planar_world.unfocus()
-        self.redraw_and_update()
-
-    def delete_selected_box_stopper(self):
-        pass
-
-    def move_selected_box_starter(self, direction):
-        if not self.planar_world.have_narity_focus(1):
-            raise DontWannaStart
-
-        direction_map = { 'left' : (-BOX_MOVE_DELTA, 0),
-                          'right' : (BOX_MOVE_DELTA, 0),
-                          'up' : (0, -BOX_MOVE_DELTA),
-                          'down' : (0, BOX_MOVE_DELTA) }
-        (self.the_move_x, self.the_move_y) = direction_map[direction]
-            
-        self.action_timer.timeout.connect(self.move_selected_box)
-        self.action_timer.start()
-
-    def move_selected_box_stopper(self, direction):
-        self.action_timer.timeout.disconnect(self.move_selected_box)
-        self.action_timer.stop()
-
-    def move_selected_box(self):
-        if self.planar_world.try_move_box(self.planar_world.get_focused(1),
-                                          self.the_move_x,
-                                          self.the_move_y):
-            self.redraw_and_update()
-    
     def box_destructive_mode_on_start(self):
         print "BOX DESTRUCTIVE MODE ON START!"
         self.planar_world._display_cutline = True
@@ -662,56 +700,7 @@ class PlanarWorldWidget(QWidget):
         self.planar_world._display_cutline = False
         self.redraw_and_update()
 
-    def move_cutline_selected_box_starter(self, direction):
-        if not self.planar_world.have_narity_focus(1):
-            raise DontWannaStart
         
-        if direction == 'up':
-            self.the_move_y = -CUTLINE_MOVE_DELTA
-        elif direction == 'down':
-            self.the_move_y = CUTLINE_MOVE_DELTA
-            
-        self.action_timer.timeout.connect(self.move_cutline_selected_box)
-        self.action_timer.start()
 
-    def move_cutline_selected_box_stopper(self, direction):
-        self.action_timer.timeout.disconnect(self.move_cutline_selected_box)
-        self.action_timer.stop()
 
-    def move_cutline_selected_box(self):
-        focused_box = self.planar_world.get_focused(1)
-        focused_box.cut_line += self.the_move_y
-        if focused_box.cut_line < 0.0:
-            focused_box.cut_line = 0.0
-        if focused_box.cut_line > 1.0:
-            focused_box.cut_line = 1.0
-
-        self.redraw_and_update()
-        
-    def cut_selected_box_starter(self):
-        if not self.planar_world.have_narity_focus(1):
-            raise DontWannaStart
-
-        if self.planar_world.try_cut_box(self.planar_world.get_focused(1)):
-            self.redraw_and_update()
-
-    def cut_selected_box_stopper(self):
-        pass
-
-    def select_index_starter(self, index):
-        self.the_index = index
-
-    def select_index_stopper(self, index):
-        self.the_index = 1
-
-    def glue_selected_boxes_starter(self):
-        if not self.planar_world.have_narity_focus(2):
-            raise DontWannaStart
-
-        if self.planar_world.try_glue_boxes(self.planar_world.get_focused(1),
-                                            self.planar_world.get_focused(2)):
-            self.redraw_and_update()
-
-    def glue_selected_boxes_stopper(self):
-        pass
         
