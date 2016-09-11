@@ -8,6 +8,8 @@ import getpass
 import mysql.connector
 import sys
 
+from utils import zooey_lock
+
 READLINE_CONFIG = '''
 set bell-style none
 set disable-completion on
@@ -116,29 +118,29 @@ def create_zooey_user_with_correct_priviliges():
         create_localhost_user(conn, 'zooey', zooey_passwd)
         grant_all_priv_on_a_database(conn, 'zooey', 'zooey')
 
-    
 if __name__ == '__main__':
-    conn = get_mysql_root_connection()
+    with zooey_lock():
+        conn = get_mysql_root_connection()
 
-    if db_exists_p(conn):
-        if not get_y_or_n_answer("WARNING: zooey db already exists, do you want to proceed?",
-                                 "Do you want to proceed?"):
-            exit()
-        print "Skipping creation of zooey db."
-    else:
-        with ok_or_fail_print("Creating zooey db ..."):
-            create_zooey_db(conn)
-
-    if user_exists_p(conn, 'zooey'):
-        # TODO : check that permissions are right
-        if get_y_or_n_answer("zooey user already exists : do you want to recreate it?",
-                             "Do you want to recreate a user?"):
-            drop_localhost_user(conn, 'zooey')
-            create_zooey_user_with_correct_priviliges()
+        if db_exists_p(conn):
+            if not get_y_or_n_answer("WARNING: zooey db already exists, do you want to proceed?",
+                                     "Do you want to proceed?"):
+                exit()
+            print "Skipping creation of zooey db."
         else:
-            print "Skipping creation of zooey user."
-    else:
-        create_zooey_user_with_correct_priviliges()
+            with ok_or_fail_print("Creating zooey db ..."):
+                create_zooey_db(conn)
+
+        if user_exists_p(conn, 'zooey'):
+            # TODO : check that permissions are right
+            if get_y_or_n_answer("zooey user already exists : do you want to recreate it?",
+                                 "Do you want to recreate a user?"):
+                drop_localhost_user(conn, 'zooey')
+                create_zooey_user_with_correct_priviliges()
+            else:
+                print "Skipping creation of zooey user."
+        else:
+            create_zooey_user_with_correct_priviliges()
             
-    conn.close()
+        conn.close()
 

@@ -8,6 +8,8 @@ import getpass
 import mysql.connector
 import sys
 
+from utils import zooey_lock
+
 READLINE_CONFIG = '''
 set bell-style none
 set disable-completion on
@@ -83,16 +85,26 @@ create table if not exists under_objects (
 ''')
     print "Under objects table created"
 
+def create_lock_table(conn):
+    conn.cursor().execute('''
+create table if not exists lock (
+    `id` int unsigned not null,
+    `pid` int(20) unsigned,
+    primary key(`id`))
+''')
+    print "Lock table created"
+    
     
 if __name__ == '__main__':
-    conn = get_mysql_zooey_connection()
+    with zooey_lock():
+        conn = get_mysql_zooey_connection()
 
-    print "Successfully got a connection!"
+        print "Successfully got a connection!"
 
-    create_cameras_table(conn)
-    create_worlds_table(conn)
-    create_boxes_table(conn)
-    create_under_objects_table(conn)
+        create_cameras_table(conn)
+        create_worlds_table(conn)
+        create_boxes_table(conn)
+        create_under_objects_table(conn)
     
-    conn.close()
+        conn.close()
     
