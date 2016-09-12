@@ -194,6 +194,12 @@ def create_box(world):
                                                    
     if box:
         world.planar_world.focus(box)
+
+def change_selected_box_color_to_next(world):
+    if not world.planar_world.have_narity_focus(1):
+        raise DontWannaStart
+
+    world.planar_world.get_focused(1).change_color_to_the_next()
         
 class ChangingObject(QObject):
     changed = pyqtSignal()
@@ -252,6 +258,31 @@ COLORS = ["white", "black", "red", "darkRed", "green", "darkGreen",
           "blue", "darkBlue", "cyan", "darkCyan", "magenta", "darkMagenta",
           "yellow", "darkYellow", "gray", "darkGray", "lightGray"]
 
+class Color(ChangingObject):
+    def __init__(self, color=None):
+        super(Color, self).__init__()
+        self.change(color)
+
+    def copy(self):
+        return Color(self._color)
+        
+    def change(self, new_color=None):
+        if new_color is None:
+            self._color = random.randint(0, len(COLORS) - 1)
+        elif new_color == 'next':
+            self._color = (self._color + 1) % len(COLORS)
+        else:
+            self._color = new_color
+        self.changed.emit()
+
+    def color(self):
+        return getattr(QtCore.Qt, COLORS[self._color])
+        
+    def draw(self, image):
+        image.fill(self.color())
+
+        
+
 class ColoredBox(ChangingObject):
     def __init__(self, x=0, y=0, w=COLORED_BOX_INIT_SIZE, h=COLORED_BOX_INIT_SIZE, color=None):
         super(ColoredBox, self).__init__()
@@ -259,22 +290,37 @@ class ColoredBox(ChangingObject):
         self.y = float(y)
         self.w = float(w)
         self.h = float(h)
-        if color is None:
-            self._color = random.randint(0, len(COLORS) - 1)
-        else:
-            self._color = color
+
+        self.init_color(color)
 
         self.cut_line = 0.5
             
         self._image = None
         self._cache_valid = False
 
-    def color(self):
-        return getattr(QtCore.Qt, COLORS[self._color])
+    def init_color(self, color):
+        # the value True means we do shallow copy (and don't have an underlying color object)
+        if color == True:
+            self.color = None
+        else:
+            if isinstance(color, Color):
+                self.color = color
+            else:
+                self.color = Color(color)
+                
+            self.color.changed.connect(self.on_change)
+
+    def on_change(self):
+        self._cache_valid = False
+        self.changed.emit()
         
     def copy(self):
-        return ColoredBox(x=self.x, y=self.y, w=self.w, h=self.h, color=self._color)
-            
+        return ColoredBox(x=self.x, y=self.y, w=self.w, h=self.h, color=self.color.copy())
+
+    def shallow_copy(self):
+        # we don't copy a color object
+        return ColoredBox(x=self.x, y=self.y, w=self.w, h=self.h, color=True)
+    
     def intersects(self, other_box):
         return ((abs(self.x - other_box.x) < (self.w + other_box.w)/2)
                 and (abs(self.y - other_box.y) < (self.h + other_box.h)/2))
@@ -294,13 +340,13 @@ class ColoredBox(ChangingObject):
         else:
             raise Exception("Unexpected scaling type: %s" % scaling_type)
 
-        self._cache_valid = False
-        self.changed.emit()
+        self.on_change()
         return self
 
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
+        # here the trick is that cached image is still valid -- that's why we don't call on_change
         self.changed.emit()
         return self
     
@@ -308,19 +354,28 @@ class ColoredBox(ChangingObject):
         if (not self._cache_valid) or (self._image is None):
             self._cache_valid = True
             self._image = QImage(QSize(self.w, self.h), QImage.Format_ARGB32)
-            self.draw()
+            self.color.draw(self._image)
         return self._image
 
-    def draw(self):
-        self._image.fill(self.color())
-    
-    def nd_zoom(self, zoom, scaling_type='zoom'):
-        '''ND stands for non-destructive -- creates a copy, and zooms it'''
-        return self.copy().zoom(zoom, scaling_type=scaling_type)
+    def change_color(self, new_color=None):
+        self.color.change(new_color)
 
-    def nd_move(self, dx, dy):
+    def change_color_to_the_next(self):
+        self.change_color('next')
+            
+    def nd_zoom(self, zoom, scaling_type='zoom', shallow=True):
         '''ND stands for non-destructive -- creates a copy, and zooms it'''
-        return self.copy().move(dx, dy)
+        if shallow:
+            return self.shallow_copy().zoom(zoom, scaling_type=scaling_type)
+        else:
+            return self.copy().zoom(zoom, scaling_type=scaling_type)
+
+    def nd_move(self, dx, dy, shallow=True):
+        '''ND stands for non-destructive -- creates a copy, and zooms it'''
+        if shallow:
+            return self.shallow_copy().move(dx, dy)
+        else:
+            return self.copy().move(dx, dy)
     
     def rectf(self):
         return QRectF(self.x - self.w/2, self.y - self.h/2, self.w, self.h)
@@ -329,8 +384,10 @@ class ColoredBox(ChangingObject):
         y1 = self.y - self.h/2 + self.cut_line * self.h / 2
         y2 = self.y + self.h/2 - (1.0 - self.cut_line) * self.h / 2
 
-        box1 = ColoredBox(x=self.x, y=y1, w=self.w, h=self.cut_line * self.h, color=self._color)
-        box2 = ColoredBox(x=self.x, y=y2, w=self.w, h=(1.0 - self.cut_line) * self.h, color=self._color)
+        # the point is that color object of the cut boxes will be shared
+        # -- then, when we color-change one, we automatically also change another
+        box1 = ColoredBox(x=self.x, y=y1, w=self.w, h=self.cut_line * self.h, color=self.color)
+        box2 = ColoredBox(x=self.x, y=y2, w=self.w, h=(1.0 - self.cut_line) * self.h, color=self.color)
         box1.move(0, -CUT_SPLIT_MOVE)
         box2.move(0, CUT_SPLIT_MOVE)
 
@@ -347,7 +404,7 @@ class ColoredBox(ChangingObject):
                           y = (area1 * self.y + area2 * other_box.y)/(area1+area2),
                           w = mean_width,
                           h = new_height1 + new_height2,
-                          color = (self._color + other_box._color)/2)
+                          color = (self.color._color + other_box.color._color)/2)
     
 class PlanarWorld(ChangingObject):
     '''The backend of the planar world
@@ -607,7 +664,8 @@ class PlanarWorldWidget(QWidget):
                                          "i" : [MoveCutlineSelectedBox, "up"],
                                          "k" : [MoveCutlineSelectedBox, "down"],
                                          "c" : cut_selected_box,
-                                         "g" : glue_selected_boxes
+                                         "g" : glue_selected_boxes,
+                                         "h" : change_selected_box_color_to_next
                                      },
               # "actions" : self.expand_action_specs("zoom_camera", "move", "move_cursor",
               #                                      "create_box", "focus_box_at_point",
