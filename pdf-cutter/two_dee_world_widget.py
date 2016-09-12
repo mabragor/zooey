@@ -252,8 +252,9 @@ COLORS = ["white", "black", "red", "darkRed", "green", "darkGreen",
           "blue", "darkBlue", "cyan", "darkCyan", "magenta", "darkMagenta",
           "yellow", "darkYellow", "gray", "darkGray", "lightGray"]
 
-class ColoredBox(object):
+class ColoredBox(ChangingObject):
     def __init__(self, x=0, y=0, w=COLORED_BOX_INIT_SIZE, h=COLORED_BOX_INIT_SIZE, color=None):
+        super(ColoredBox, self).__init__()
         self.x = float(x) # x and y are coordinates of the CENTER of the box (center of mass if you will)
         self.y = float(y)
         self.w = float(w)
@@ -294,11 +295,13 @@ class ColoredBox(object):
             raise Exception("Unexpected scaling type: %s" % scaling_type)
 
         self._cache_valid = False
+        self.changed.emit()
         return self
 
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
+        self.changed.emit()
         return self
     
     def image(self):
@@ -370,10 +373,18 @@ class PlanarWorld(ChangingObject):
         new_box = ColoredBox(x = x, y = y, w=size, h=size)
         if self.intersects_with_something(new_box):
             return None
-        self.objects.append(new_box)
+        self.add_box(new_box)
         self.changed.emit()
         return new_box
 
+    def add_box(self, new_box):
+        self.objects.append(new_box)
+        new_box.changed.connect(self.changed)
+
+    def remove_box(self, box):
+        self.objects.remove(box)
+        box.changed.disconnect(self.changed)
+        
     def find_box_at_point(self, x, y):
         for box in self.objects:
             if box.contains_point(x, y):
@@ -426,8 +437,7 @@ class PlanarWorld(ChangingObject):
         if not self.intersects_with_something(box.nd_zoom(zoom, scaling_type=scaling_type), box):
             # after we've checked non-destructively everything is OK, we do destructively in-place
             # print "TRY ZOOM BOX: we do not intersect with anything"
-            res = box.zoom(zoom, scaling_type=scaling_type)
-            self.changed.emit()
+            return box.zoom(zoom, scaling_type=scaling_type)
         # print "TRY ZOOM BOX: we intersect with something"
         # Otherwise we don't change anything
         return None
@@ -451,9 +461,9 @@ class PlanarWorld(ChangingObject):
         (box1, box2) = box.cut()
         if (not self.intersects_with_something(box1, box)
             and not self.intersects_with_something(box2, box)):
-            self.objects.remove(box)
-            self.objects.append(box1)
-            self.objects.append(box2)
+            self.remove_box(box)
+            self.add_box(box1)
+            self.add_box(box2)
             self.unfocus()
             self.focus(box1, 1)
             self.focus(box2, 2)
@@ -462,16 +472,16 @@ class PlanarWorld(ChangingObject):
         return False
 
     def delete_selected_box(self):
-        self.objects.remove(self.get_focused(1))
+        self.remove_box(self.get_focused(1))
         self.unfocus()
         self.changed.emit()
     
     def try_glue_boxes(self, box1, box2):
         new_box = box1.glue(box2)
         if not self.intersects_with_something(new_box, box1, box2):
-            self.objects.remove(box1)
-            self.objects.remove(box2)
-            self.objects.append(new_box)
+            self.remove_box(box1)
+            self.remove_box(box2)
+            self.add_box(new_box)
             self.unfocus()
             self.focus(new_box, 1)
             self.changed.emit()
