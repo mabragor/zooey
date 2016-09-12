@@ -8,7 +8,7 @@ import getpass
 import mysql.connector
 import sys
 
-from utils import zooey_lock
+from utils import zooey_lock, interactive_get_mysql_zooey_connection
 
 READLINE_CONFIG = '''
 set bell-style none
@@ -20,19 +20,6 @@ ZOOEY_DB_NAME = 'zooey'
 for line in READLINE_CONFIG.split("\n"):
     print line
     readline.parse_and_bind(line)
-
-def get_mysql_zooey_connection():
-    print "Enter MySQL credentials of zooey user"
-    
-    zooey_login = raw_input("Login (default: zooey)> ")
-    if zooey_login == '':
-        zooey_login = 'zooey'
-    zooey_passwd = getpass.getpass("Password> ")
-    print ''
-    return mysql.connector.connect(user=zooey_login,
-                                   password=zooey_passwd,
-                                   host='127.0.0.1',
-                                   database='zooey')
 
 def create_cameras_table(conn):
     conn.cursor().execute('''

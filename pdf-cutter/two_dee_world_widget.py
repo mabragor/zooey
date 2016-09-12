@@ -3,7 +3,7 @@
 
 from PyQt4 import (QtCore, QtGui)
 from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor)
-from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize, QString)
+from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize, QString, QObject, pyqtSignal, pyqtSlot)
 import time
 import random
 
@@ -21,6 +21,9 @@ NEW_BOX_ONSCREEN_SIZE = 50.0
 BOX_ZOOM_DELTA = 0.01
 BOX_MOVE_DELTA = 1
 CUTLINE_MOVE_DELTA = 0.01
+
+ZOOEY_LOGIN='zooey'
+ZOOEY_PASSWD='zooey-hey-zoomable'
 
 class Action(object):
     def __init__(self, world, interval = 10):
@@ -64,15 +67,13 @@ class ZoomCamera(Action):
 
     def body(self):
         self.world.camera.zoom(1.0 + self.zoom_delta)
-        self.world.redraw_and_update()
 
 def glue_selected_boxes(world):
     if not world.planar_world.have_narity_focus(2):
         raise DontWannaStart
 
-    if world.planar_world.try_glue_boxes(world.planar_world.get_focused(1),
-                                         world.planar_world.get_focused(2)):
-        world.redraw_and_update()
+    world.planar_world.try_glue_boxes(world.planar_world.get_focused(1),
+                                      world.planar_world.get_focused(2))
 
 class SelectIndex(OneshotAction):
     def __init__(self, world, index):
@@ -86,8 +87,7 @@ def cut_selected_box(world):
     if not world.planar_world.have_narity_focus(1):
         raise DontWannaStart
 
-    if world.planar_world.try_cut_box(world.planar_world.get_focused(1)):
-        world.redraw_and_update()
+    world.planar_world.try_cut_box(world.planar_world.get_focused(1))
 
 class MoveCutlineSelectedBox(Action):
     def __init__(self, world, direction):
@@ -103,14 +103,7 @@ class MoveCutlineSelectedBox(Action):
         super(MoveCutlineSelectedBox, self).__init__(world)
 
     def body(self):
-        focused_box = self.world.planar_world.get_focused(1)
-        focused_box.cut_line += self.move_y
-        if focused_box.cut_line < 0.0:
-            focused_box.cut_line = 0.0
-        if focused_box.cut_line > 1.0:
-            focused_box.cut_line = 1.0
-
-        self.world.redraw_and_update()
+        self.world.planar_world.move_selected_box_cutline(self.move_y)
 
 class MoveSelectedBox(Action):
     def __init__(self, world, direction):
@@ -125,19 +118,14 @@ class MoveSelectedBox(Action):
         super(MoveSelectedBox, self).__init__(world)
 
     def body(self):
-        if self.world.planar_world.try_move_box(self.world.planar_world.get_focused(1),
-                                                self.move_x,
-                                                self.move_y):
-            self.world.redraw_and_update()
+        self.world.planar_world.try_move_selected_box(self.move_x, self.move_y)
 
 def delete_selected_box(world):
     if not world.planar_world.have_narity_focus(1):
         raise DontWannaStart
 
-    world.planar_world.objects.remove(world.planar_world.get_focused(1))
-    world.planar_world.unfocus()
-    world.redraw_and_update()
-
+    world.planar_world.delete_selected_box()
+    
 class ScaleSelectedBox(Action):
     def __init__(self, world, direction):
         if not world.planar_world.have_narity_focus(1):
@@ -160,15 +148,11 @@ class ScaleSelectedBox(Action):
         super(ScaleSelectedBox, self).__init__(world)
 
     def body(self):
-        if self.world.planar_world.try_zoom_box(self.world.planar_world.get_focused(1),
-                                                1.0 + self.zoom_delta,
-                                                scaling_type=self.scaling_type):
-            self.world.redraw_and_update()
+        self.world.planar_world.try_zoom_selected_box(1.0 + self.zoom_delta, scaling_type=self.scaling_type)
 
         
 def unfocus_everything(world):
-    if world.planar_world.unfocus():
-        world.redraw_and_update()
+    world.planar_world.unfocus()
     
 def focus_box_at_point(world):
     abs_pos = world.cursor_abs()
@@ -176,7 +160,6 @@ def focus_box_at_point(world):
                                                    
     if box:
         world.planar_world.focus(box, world.the_index)
-        world.redraw_and_update()
 
 class MoveCursor(Action):
     def __init__(self, world, direction):
@@ -203,7 +186,6 @@ class MoveCamera(Action):
         
     def body(self):
         self.world.camera.move(self.move_x, self.move_y)
-        self.world.redraw_and_update()
 
 def create_box(world):
     abs_pos = world.cursor_abs()
@@ -212,25 +194,28 @@ def create_box(world):
                                                    
     if box:
         world.planar_world.focus(box)
-        # we only redraw if we've successfully created the box
-        world.redraw_and_update()
         
-
+class ChangingObject(QObject):
+    changed = pyqtSignal()
         
-class Camera(object):
-    def __init__(self, x = 0.0, y = 0.0, distance = 1.0):
+class Camera(ChangingObject):
+    def __init__(self, x = 0.0, y = 0.0, distance = 1.0, id=None):
+        super(Camera, self).__init__()
         self.x = x
         self.y = y
         # "absolute" sizes are distance * "camera" sizes -- the ones we see on screen
         self.d = float(distance)
         self.d0 = 1.0
+        self.id = id
 
     def zoom(self, zoom):
         self.d /= zoom
+        self.changed.emit()
 
     def move(self, dx, dy):
         self.x += dx * self.d/self.d0
         self.y += dy * self.d/self.d0
+        self.changed.emit()
         
     def abs_to_cam(self, thing):
         if isinstance(thing, QPointF):
@@ -361,13 +346,15 @@ class ColoredBox(object):
                           h = new_height1 + new_height2,
                           color = (self._color + other_box._color)/2)
     
-class PlanarWorld(object):
+class PlanarWorld(ChangingObject):
     '''The backend of the planar world
     It knows about objects in it, it can move them around, create and so on.'''
-    def __init__(self):
+    def __init__(self, id=None):
+        super(PlanarWorld, self).__init__()
         self.objects = []
         self.init_focus_registers()
         self._display_cutline = False
+        self.id = id
 
     def intersects_with_something(self, box, *except_boxes):
         '''True if we intersect with anything except ourself and some 'exceptional' box'''
@@ -384,6 +371,7 @@ class PlanarWorld(object):
         if self.intersects_with_something(new_box):
             return None
         self.objects.append(new_box)
+        self.changed.emit()
         return new_box
 
     def find_box_at_point(self, x, y):
@@ -405,6 +393,7 @@ class PlanarWorld(object):
 
         # and then we focus it under a new register
         self._focus[(index + 10 - 1) % 10] = box
+        self.changed.emit()
 
     def unfocus(self):
         '''Returns True if we've actually unfocused something'''
@@ -413,6 +402,8 @@ class PlanarWorld(object):
             if item is not None:
                 flag = True
                 self._focus[i] = None
+        if flag:
+            self.changed.emit()
         return flag
 
     def have_narity_focus(self, arity):
@@ -435,18 +426,27 @@ class PlanarWorld(object):
         if not self.intersects_with_something(box.nd_zoom(zoom, scaling_type=scaling_type), box):
             # after we've checked non-destructively everything is OK, we do destructively in-place
             # print "TRY ZOOM BOX: we do not intersect with anything"
-            return box.zoom(zoom, scaling_type=scaling_type)
+            res = box.zoom(zoom, scaling_type=scaling_type)
+            self.changed.emit()
         # print "TRY ZOOM BOX: we intersect with something"
         # Otherwise we don't change anything
         return None
 
+    def try_zoom_selected_box(self, zoom, scaling_type='zoom'):
+        return self.try_zoom_box(self.get_focused(1), zoom, scaling_type)
+    
     def try_move_box(self, box, dx, dy):
         if not self.intersects_with_something(box.nd_move(dx, dy), box):
             # after we've checked non-destructively everything is OK, we do destructively in-place
-            return box.move(dx, dy)
+            res = box.move(dx, dy)
+            self.changed.emit()
+            return res
         # Otherwise we don't change anything
         return None
 
+    def try_move_selected_box(self, dx, dy):
+        return self.try_move_box(self.get_focused(1), dx, dy)
+    
     def try_cut_box(self, box):
         (box1, box2) = box.cut()
         if (not self.intersects_with_something(box1, box)
@@ -457,9 +457,15 @@ class PlanarWorld(object):
             self.unfocus()
             self.focus(box1, 1)
             self.focus(box2, 2)
+            self.changed.emit()
             return True
         return False
 
+    def delete_selected_box(self):
+        self.objects.remove(self.get_focused(1))
+        self.unfocus()
+        self.changed.emit()
+    
     def try_glue_boxes(self, box1, box2):
         new_box = box1.glue(box2)
         if not self.intersects_with_something(new_box, box1, box2):
@@ -468,9 +474,29 @@ class PlanarWorld(object):
             self.objects.append(new_box)
             self.unfocus()
             self.focus(new_box, 1)
+            self.changed.emit()
             return True
         return False
-    
+
+    def display_cutline(self):
+        self._display_cutline = True
+        self.changed.emit()
+
+    def hide_cutline(self):
+        self._display_cutline = False
+        self.changed.emit()
+        
+    def move_selected_box_cutline(self, dy):
+        focused_box = self.get_focused(1)
+        focused_box.cut_line += dy
+        if focused_box.cut_line < 0.0:
+            focused_box.cut_line = 0.0
+        if focused_box.cut_line > 1.0:
+            focused_box.cut_line = 1.0
+            
+        self.changed.emit()
+
+        
 class PlanarWorldWidget(QWidget):
     def __init__(self):
         super(PlanarWorldWidget, self).__init__(None)
@@ -480,6 +506,7 @@ class PlanarWorldWidget(QWidget):
         self.init_camera_and_qimage()
 
         self.planar_world = PlanarWorld()
+        self.planar_world.changed.connect(self.redraw_and_update)
 
         # the optional index used by some commands
         self.the_index = 1
@@ -491,8 +518,12 @@ class PlanarWorldWidget(QWidget):
         print "Initializing camera and qimage"
         scale = min(float(self.frameSize().width()),
                     float(self.frameSize().height()))
+        
         self.camera = Camera()
         self._cam_to_screen_zoom = scale / 2 / float(THE_BLACK_BOX.width())
+        print "INIT_CAMERA_AND_QIMAGE", self.camera.changed, dir(self.camera.changed)
+        self.camera.changed.connect(self.redraw_and_update)
+        
         self.make_new_qimage(self.frameSize())
 
     def cam_to_screen(self, thing):
@@ -560,8 +591,8 @@ class PlanarWorldWidget(QWidget):
                              "j" : [MoveSelectedBox, "left"],
                              "k" : [MoveSelectedBox, "down"],
                              "l" : [MoveSelectedBox, "right"] },
-              "box_destructive_mode" : { "options" : { 'on_start' : self.box_destructive_mode_on_start,
-                                                       'on_stop' : self.box_destructive_mode_on_stop },
+              "box_destructive_mode" : { "options" : { 'on_start' : self.planar_world.display_cutline,
+                                                       'on_stop' : self.planar_world.hide_cutline },
                                          "r" : delete_selected_box,
                                          "i" : [MoveCutlineSelectedBox, "up"],
                                          "k" : [MoveCutlineSelectedBox, "down"],
@@ -706,15 +737,6 @@ class PlanarWorldWidget(QWidget):
         # print "CURSOR ABS:", self.frameSize(), self.the_qimage.rect(), pos
         return self.camera.cam_to_abs(self.screen_to_cam(QPointF(self.mapFromGlobal(pos))))
         
-    def box_destructive_mode_on_start(self):
-        print "BOX DESTRUCTIVE MODE ON START!"
-        self.planar_world._display_cutline = True
-        self.redraw_and_update()
-
-    def box_destructive_mode_on_stop(self):
-        print "BOX DESTRUCTIVE MODE ON STOP!"
-        self.planar_world._display_cutline = False
-        self.redraw_and_update()
 
         
 
