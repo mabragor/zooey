@@ -1,6 +1,8 @@
 
+import mysql.connector
 import subprocess
 import os
+import getpass
 
 ### ZOOEY lock
 def take_zooey_lock():
@@ -43,3 +45,14 @@ def interactive_get_mysql_zooey_connection():
     zooey_passwd = getpass.getpass("Password> ")
     print ''
     return get_mysql_zooey_connection(zooey_login, zooey_passwd)
+
+def mysql_zooey_connection(login, passwd):
+    class Frob(object):
+        def __enter__(self):
+            self.conn = get_mysql_zooey_connection(login, passwd)
+            return self.conn
+        def __exit__(self, type, value, traceback):
+            self.conn.disconnect()
+            return False
+
+    return Frob()

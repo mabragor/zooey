@@ -18,7 +18,7 @@ set disable-completion on
 ZOOEY_DB_NAME = 'zooey'
 
 for line in READLINE_CONFIG.split("\n"):
-    print line
+    # print line
     readline.parse_and_bind(line)
 
 def create_cameras_table(conn):
@@ -31,6 +31,7 @@ create table if not exists cameras (
     `d` double not null,
     primary key(`camera_id`),
     key `world` (`world_id`))
+    engine = MyISAM
 ''')
     print "Cameras table created"
 
@@ -40,6 +41,7 @@ create table if not exists worlds (
     `world_id` bigint(20) unsigned not null,
     `name` varchar(1000) character set utf8 not null default '',
     primary key(`world_id`))
+    engine = MyISAM
 ''')
     print "Worlds table created"
 
@@ -57,6 +59,7 @@ create table if not exists boxes (
     primary key(`box_id`),
     key `world` (`world_id`),
     key `under_object` (`under_object_id`))
+    engine = MyISAM
 ''')
     print "Boxes table created"
 
@@ -69,22 +72,24 @@ create table if not exists under_objects (
     `g` int unsigned not null,
     `b` int unsigned not null,
     primary key(`under_object_id`))
+    engine = MyISAM
 ''')
     print "Under objects table created"
 
-def create_lock_table(conn):
-    conn.cursor().execute('''
-create table if not exists lock (
-    `id` int unsigned not null,
-    `pid` int(20) unsigned,
-    primary key(`id`))
-''')
-    print "Lock table created"
+# def create_lock_table(conn):
+#     conn.cursor().execute('''
+# create table if not exists lock (
+#     `id` int unsigned not null,
+#     `pid` int(20) unsigned,
+#     primary key(`id`))
+#     engine = MyISAM
+# ''')
+#     print "Lock table created"
     
     
 if __name__ == '__main__':
     with zooey_lock():
-        conn = get_mysql_zooey_connection()
+        conn = interactive_get_mysql_zooey_connection()
 
         print "Successfully got a connection!"
 

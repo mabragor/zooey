@@ -1,6 +1,8 @@
 ### 2dworld_widget.py
 ### The simple 2d world, where colored boxes (and later, more complicated objects) would live.
 
+from __future__ import with_statement
+
 from PyQt4 import (QtCore, QtGui)
 from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor)
 from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize, QString, QObject, pyqtSignal, pyqtSlot)
@@ -9,6 +11,7 @@ import random
 
 # from linear_transform import linear_transform
 from modal_dispatcher import (ModalDispatcher, DontWannaStart)
+from utils import mysql_zooey_connection
 
 THE_BLACK_BOX = QRectF(-50, -50, 100, 100)
 FRAME_START_RATIO = 1.0
@@ -195,6 +198,10 @@ def create_box(world):
     if box:
         world.planar_world.focus(box)
 
+def save_everything(world):
+    with mysql_zooey_connection(ZOOEY_LOGIN, ZOOEY_PASSWD) as conn:
+        world.camera.mysql_save(conn)
+        
 def change_selected_box_color_to_next(world):
     if not world.planar_world.have_narity_focus(1):
         raise DontWannaStart
@@ -203,7 +210,7 @@ def change_selected_box_color_to_next(world):
         
 class ChangingObject(QObject):
     changed = pyqtSignal()
-        
+
 class Camera(ChangingObject):
     def __init__(self, x = 0.0, y = 0.0, distance = 1.0, id=None):
         super(Camera, self).__init__()
@@ -248,6 +255,23 @@ class Camera(ChangingObject):
 
         raise Exception("Unknown type %s" % thing)
 
+    @staticmethod
+    def mysql_load(conn):
+        '''This will load a camera object from MySQL for us.'''
+        pass
+    
+    def mysql_save(self, conn):
+        # TODO : actually make multiple world IDs possible
+        res = conn.cursor().execute('''
+insert into cameras (camera_id, world_id, x, y, d)
+    values (%(camera_id)s, %(world_id)s, %(x)s, %(y)s, %(d)s)
+    on duplicate key update
+        world_id = values(world_id),
+        x = values(x),
+        y = values(y),
+        d = values(d)
+        ''', { 'camera_id' : self.id, 'world_id' : 1, 'x' : self.x, 'y' : self.y, 'd' : self.d})
+        print res
         
         
     
@@ -586,7 +610,7 @@ class PlanarWorldWidget(QWidget):
         scale = min(float(self.frameSize().width()),
                     float(self.frameSize().height()))
         
-        self.camera = Camera()
+        self.camera = Camera(id=1)
         self._cam_to_screen_zoom = scale / 2 / float(THE_BLACK_BOX.width())
         print "INIT_CAMERA_AND_QIMAGE", self.camera.changed, dir(self.camera.changed)
         self.camera.changed.connect(self.redraw_and_update)
@@ -631,7 +655,6 @@ class PlanarWorldWidget(QWidget):
                          "8" : [SelectIndex, 8],
                          "9" : [SelectIndex, 9],
                          "0" : [SelectIndex, 0] },
-              # "actions" : self.expand_action_specs("select_index")
             })
         self.modal_dispatcher = ModalDispatcher(
             self,
@@ -643,8 +666,10 @@ class PlanarWorldWidget(QWidget):
                          "l" : [MoveCamera, "right"],
                          "q" : ["mode", "cursor_mode"],
                          "b" : ["mode", "box_mode"],
+                         "control" : ["mode", "ctrl_mode"],
                          "f" : focus_box_at_point,
                          "u" : unfocus_everything },
+              "ctrl_mode" : { "s" : save_everything },
               "cursor_mode" : { "options" : {"inherit" : True },
                                 "i" : [MoveCursor, "up"],
                                 "j" : [MoveCursor, "left"],
@@ -667,12 +692,6 @@ class PlanarWorldWidget(QWidget):
                                          "g" : glue_selected_boxes,
                                          "h" : change_selected_box_color_to_next
                                      },
-              # "actions" : self.expand_action_specs("zoom_camera", "move", "move_cursor",
-              #                                      "create_box", "focus_box_at_point",
-              #                                      "unfocus", "scale_selected_box",
-              #                                      "delete_selected_box", "move_selected_box",
-              #                                      "move_cutline_selected_box",
-              #                                      "cut_selected_box", "glue_selected_boxes")
             })
 
     def expand_action_specs(self, *specs):
