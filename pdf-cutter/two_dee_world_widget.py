@@ -201,6 +201,9 @@ def create_box(world):
 def save_everything(world):
     with mysql_zooey_connection(ZOOEY_LOGIN, ZOOEY_PASSWD) as conn:
         world.camera.mysql_save(conn)
+
+def load_everything(world):
+    world.mysql_load_camera()
         
 def change_selected_box_color_to_next(world):
     if not world.planar_world.have_narity_focus(1):
@@ -256,9 +259,15 @@ class Camera(ChangingObject):
         raise Exception("Unknown type %s" % thing)
 
     @staticmethod
-    def mysql_load(conn):
+    def mysql_load(conn, camera_id):
         '''This will load a camera object from MySQL for us.'''
-        pass
+        cur = conn.cursor()
+        cur.execute('select camera_id, world_id, x, y, d from cameras where camera_id = 1')
+        res = cur.fetchone()
+        if res is not None:
+            (cam_id, world_id, x, y ,d) = res
+            return Camera(x=x, y=y, distance=d, id=cam_id)
+        return None
     
     def mysql_save(self, conn):
         # TODO : actually make multiple world IDs possible
@@ -669,7 +678,8 @@ class PlanarWorldWidget(QWidget):
                          "control" : ["mode", "ctrl_mode"],
                          "f" : focus_box_at_point,
                          "u" : unfocus_everything },
-              "ctrl_mode" : { "s" : save_everything },
+              "ctrl_mode" : { "s" : save_everything,
+                              "l" : load_everything },
               "cursor_mode" : { "options" : {"inherit" : True },
                                 "i" : [MoveCursor, "up"],
                                 "j" : [MoveCursor, "left"],
@@ -824,7 +834,15 @@ class PlanarWorldWidget(QWidget):
         # print "CURSOR ABS:", self.frameSize(), self.the_qimage.rect(), pos
         return self.camera.cam_to_abs(self.screen_to_cam(QPointF(self.mapFromGlobal(pos))))
         
-
+    def mysql_load_camera(self):
+        new_camera = None
+        with mysql_zooey_connection(ZOOEY_LOGIN, ZOOEY_PASSWD) as conn:
+            new_camera = Camera.mysql_load(conn, 1)
+        if new_camera is not None:
+            self.camera.changed.disconnect(self.redraw_and_update)
+            self.camera = new_camera
+            self.camera.changed.connect(self.redraw_and_update)
+            self.redraw_and_update()
         
 
 
