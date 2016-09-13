@@ -603,6 +603,7 @@ class PlanarWorld(ChangingObject):
             except:
                 pass
         self.init_boxes_stats()
+        self.unfocus()
         
     def find_box_at_point(self, x, y):
         for box in self.objects:
