@@ -56,3 +56,19 @@ def mysql_zooey_connection(login, passwd):
             return False
 
     return Frob()
+
+def mysql_transaction(conn):
+    class Frob(object):
+        def __enter__(self):
+            conn.cursor().execute('start transaction')
+            return True
+        def __exit__(self, type, value, traceback):
+            if type is None:
+                conn.cursor().execute('commit')
+            else:
+                conn.cursor().execute('rollback')
+            return False
+
+    return Frob()
+
+    

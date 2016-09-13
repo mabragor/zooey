@@ -11,7 +11,7 @@ import random
 
 # from linear_transform import linear_transform
 from modal_dispatcher import (ModalDispatcher, DontWannaStart)
-from utils import mysql_zooey_connection
+from utils import (mysql_zooey_connection, mysql_transaction)
 
 THE_BLACK_BOX = QRectF(-50, -50, 100, 100)
 FRAME_START_RATIO = 1.0
@@ -200,7 +200,8 @@ def create_box(world):
 
 def save_everything(world):
     with mysql_zooey_connection(ZOOEY_LOGIN, ZOOEY_PASSWD) as conn:
-        world.camera.mysql_save(conn)
+        with mysql_transaction(conn):
+            world.camera.mysql_save(conn)
 
 def load_everything(world):
     world.mysql_load_camera()
@@ -262,7 +263,11 @@ class Camera(ChangingObject):
     def mysql_load(conn, camera_id):
         '''This will load a camera object from MySQL for us.'''
         cur = conn.cursor()
-        cur.execute('select camera_id, world_id, x, y, d from cameras where camera_id = 1')
+        try:
+            cur.execute('select camera_id, world_id, x, y, d from cameras where camera_id = 1')
+        except Exception as e:
+            print "Caught exception while trying to load camera:", e
+            return None
         res = cur.fetchone()
         if res is not None:
             (cam_id, world_id, x, y ,d) = res

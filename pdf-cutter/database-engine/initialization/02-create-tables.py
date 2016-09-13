@@ -31,7 +31,7 @@ create table if not exists cameras (
     `d` double not null,
     primary key(`camera_id`),
     key `world` (`world_id`))
-    engine = MyISAM
+    engine = InnoDB
 ''')
     print "Cameras table created"
 
@@ -41,7 +41,7 @@ create table if not exists worlds (
     `world_id` bigint(20) unsigned not null,
     `name` varchar(1000) character set utf8 not null default '',
     primary key(`world_id`))
-    engine = MyISAM
+    engine = InnoDB
 ''')
     print "Worlds table created"
 
@@ -59,7 +59,7 @@ create table if not exists boxes (
     primary key(`box_id`),
     key `world` (`world_id`),
     key `under_object` (`under_object_id`))
-    engine = MyISAM
+    engine = InnoDB
 ''')
     print "Boxes table created"
 
@@ -72,7 +72,7 @@ create table if not exists under_objects (
     `g` int unsigned not null,
     `b` int unsigned not null,
     primary key(`under_object_id`))
-    engine = MyISAM
+    engine = InnoDB
 ''')
     print "Under objects table created"
 
@@ -82,7 +82,7 @@ create table if not exists under_objects (
 #     `id` int unsigned not null,
 #     `pid` int(20) unsigned,
 #     primary key(`id`))
-#     engine = MyISAM
+#     engine = InnoDB
 # ''')
 #     print "Lock table created"
     
