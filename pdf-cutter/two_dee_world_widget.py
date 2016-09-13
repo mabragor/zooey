@@ -202,16 +202,27 @@ def save_everything(world):
     with mysql_zooey_connection(ZOOEY_LOGIN, ZOOEY_PASSWD) as conn:
         with mysql_transaction(conn):
             world.camera.mysql_save(conn)
+            world.planar_world.mysql_save_boxes(conn)
 
 def load_everything(world):
-    world.mysql_load_camera()
+    with mysql_zooey_connection(ZOOEY_LOGIN, ZOOEY_PASSWD) as conn:
+        world.mysql_load_camera(conn)
+        world.mysql_load_boxes(conn)
         
 def change_selected_box_color_to_next(world):
     if not world.planar_world.have_narity_focus(1):
         raise DontWannaStart
 
     world.planar_world.get_focused(1).change_color_to_the_next()
+
+def load_boxes_iter(conn, world_id):
+    cur = conn.cursor()
+    cur.execute('select box_id, under_object_id, x, y, w, h, cut_line from boxes_' + str(world_id))
+    for (box_id, under_object_id, x, y, w, h, cut_line) in cur:
+        # print "LOAD_BOXES_ITER", box_id, under_object_id, x, y, w, h, cut_line
+        yield ColoredBox(x=x, y=y, w=w, h=h, id=box_id, cut_line=cut_line)
         
+    
 class ChangingObject(QObject):
     changed = pyqtSignal()
 
@@ -322,16 +333,18 @@ class Color(ChangingObject):
         
 
 class ColoredBox(ChangingObject):
-    def __init__(self, x=0, y=0, w=COLORED_BOX_INIT_SIZE, h=COLORED_BOX_INIT_SIZE, color=None):
+    def __init__(self, x=0, y=0, w=COLORED_BOX_INIT_SIZE, h=COLORED_BOX_INIT_SIZE, color=None, id=None,
+                 cut_line=0.5):
         super(ColoredBox, self).__init__()
         self.x = float(x) # x and y are coordinates of the CENTER of the box (center of mass if you will)
         self.y = float(y)
         self.w = float(w)
         self.h = float(h)
+        self.id = id
 
         self.init_color(color)
 
-        self.cut_line = 0.5
+        self.cut_line = cut_line
             
         self._image = None
         self._cache_valid = False
@@ -444,16 +457,106 @@ class ColoredBox(ChangingObject):
                           h = new_height1 + new_height2,
                           color = (self.color._color + other_box.color._color)/2)
     
+    def move_cutline(self, dy):
+        self.cut_line += dy
+        if self.cut_line < 0.0:
+            self.cut_line = 0.0
+        if self.cut_line > 1.0:
+            self.cut_line = 1.0
+            
+        self.changed.emit()
+
+    @staticmethod
+    def sql_columns():
+        return '(box_id, world_id, under_object_id, x, y, w, h, cut_line)'
+        
+    def serialize_for_mysql(self):
+        return ('('
+                + ', '.join(map(str, (self.id, 1, 1, self.x, self.y, self.w, self.h, self.cut_line)))
+                + ')')
+    
+class IDIntervals(object):
+    def __init__(self):
+        self._index = []
+        
+    def first_free_index(self):
+        if self._index == []:
+            return 1
+
+        # we assume that the structure of the intervals is correct -- no need to check it
+        return self._index[0][1] + 1
+
+    def register(self, id):
+        if self._index == []:
+            self._index.append([id,id])
+            return True
+        the_i = None
+        for (i, interval) in enumerate(self._index):
+            if id >= interval[0] and id <= interval[1]:
+                raise Exception("Attempt to register ID that has already been registered")
+            elif id < interval[0]:
+                the_i = i
+                break
+        if the_i is None:
+            # this means that id is larger than any interval we have so far
+            if id == self._index[-1][1] + 1:
+                self._index[-1][1] += 1
+            else:
+                self._index.append([id, id])
+        elif the_i == 0:
+            if id == self._index[0][0] - 1:
+                self._index[0][0] -= 1
+            else:
+                self._index.insert(0, [id,id])
+        else:
+            (r_start, r_stop) = self._index[the_i]
+            (l_start, l_stop) = self._index[the_i-1]
+            if id == r_start - 1:
+                self._index[the_i] -= 1
+                if l_stop == r_start - 2:
+                    l_stop = r_stop
+                    self._index.pop(the_i)
+            elif id == l_stop + 1:
+                self._index[the_i - 1] += 1
+                # here we already don't need to check for doulbe interval glueing
+            else:
+                self._index.insert(the_i, [id,id])
+        return True
+
+    def deregister(self, id):
+        for (i, interval) in enumerate(self._index):
+            (start, stop) = interval
+            if start <= id and id <= stop:
+                if start == stop:
+                    self._index.pop(i)
+                elif id == start:
+                    self._index[i][0] += 1
+                elif id == stop:
+                    self._index[i][1] -= 1
+                else:
+                    self._index[i][0] = id + 1
+                    self._index.insert(i, [start, id-1])
+                return
+        raise Exception('Attempt to deregister id that had not been registered yet.')
+
+    
 class PlanarWorld(ChangingObject):
     '''The backend of the planar world
     It knows about objects in it, it can move them around, create and so on.'''
     def __init__(self, id=None):
         super(PlanarWorld, self).__init__()
-        self.objects = []
+
+        self.init_boxes_stats()
+        
         self.init_focus_registers()
         self._display_cutline = False
         self.id = id
 
+    def init_boxes_stats(self):
+        self.objects = []
+        self.box_id_intervals = IDIntervals()
+        self.changed_box_ids = {}
+        
     def intersects_with_something(self, box, *except_boxes):
         '''True if we intersect with anything except ourself and some 'exceptional' box'''
         for other in self.objects:
@@ -468,17 +571,38 @@ class PlanarWorld(ChangingObject):
         new_box = ColoredBox(x = x, y = y, w=size, h=size)
         if self.intersects_with_something(new_box):
             return None
+        new_box.id = self.box_id_intervals.first_free_index()
         self.add_box(new_box)
         self.changed.emit()
         return new_box
 
-    def add_box(self, new_box):
+    def on_box_change(self, box):
+        def foo():
+            self.changed_box_ids[box.id] = True
+            self.changed.emit()
+        return foo
+    
+    def add_box(self, new_box, mark_changed=True):
         self.objects.append(new_box)
-        new_box.changed.connect(self.changed)
+        new_box.changed.connect(self.on_box_change(new_box))
+        self.box_id_intervals.register(new_box.id)
+        if mark_changed:
+            self.changed_box_ids[new_box.id] = True
 
     def remove_box(self, box):
         self.objects.remove(box)
         box.changed.disconnect(self.changed)
+        self.box_id_intervals.deregister(box.id)
+        self.changed_box_ids[box.id] = True
+
+    def flush_boxes(self):
+        '''Remove all the boxes -- taking advantage that we can do it in a bulk way'''
+        for box in self.objects:
+            try:
+                box.changed.disconnect()
+            except:
+                pass
+        self.init_boxes_stats()
         
     def find_box_at_point(self, x, y):
         for box in self.objects:
@@ -592,16 +716,31 @@ class PlanarWorld(ChangingObject):
         self.changed.emit()
         
     def move_selected_box_cutline(self, dy):
-        focused_box = self.get_focused(1)
-        focused_box.cut_line += dy
-        if focused_box.cut_line < 0.0:
-            focused_box.cut_line = 0.0
-        if focused_box.cut_line > 1.0:
-            focused_box.cut_line = 1.0
-            
+        self.get_focused(1).move_cutline(dy)
+
+    def mysql_load_boxes(self, conn):
+        for box in load_boxes_iter(conn, self.id or 1):
+            self.add_box(box)
         self.changed.emit()
 
-        
+    def serialize_changed_boxes(self):
+        return '(' + ', '.join(map(str, self.changed_box_ids.keys())) + ')'
+            
+    def mysql_save_boxes(self, conn):
+        # drop all entries that have been changed or deleted
+        conn.cursor().execute('delete from boxes_' + str(self.id or 1)
+                              + ' where box_id in ' + self.serialize_changed_boxes())
+        # recreate the ones that are still present
+        values = []
+        for box in self.objects:
+            if box.id in self.changed_box_ids:
+                values.append(box.serialize_for_mysql())
+        conn.cursor().execute('insert into boxes_' + str(self.id or 1)
+                              + ' ' + ColoredBox.sql_columns()
+                              + ' values ' + ','.join(values))
+
+
+            
 class PlanarWorldWidget(QWidget):
     def __init__(self):
         super(PlanarWorldWidget, self).__init__(None)
@@ -838,17 +977,27 @@ class PlanarWorldWidget(QWidget):
         pos = QCursor().pos()
         # print "CURSOR ABS:", self.frameSize(), self.the_qimage.rect(), pos
         return self.camera.cam_to_abs(self.screen_to_cam(QPointF(self.mapFromGlobal(pos))))
+
+    def flush_camera(self):
+        self.camera.changed.disconnect(self.redraw_and_update)
+        self.camera = None
+
+    def connect_camera(self, new_camera):
+        self.camera = new_camera
+        self.camera.changed.connect(self.redraw_and_update)
         
-    def mysql_load_camera(self):
-        new_camera = None
-        with mysql_zooey_connection(ZOOEY_LOGIN, ZOOEY_PASSWD) as conn:
-            new_camera = Camera.mysql_load(conn, 1)
+    def mysql_load_camera(self, conn):
+        new_camera = Camera.mysql_load(conn, 1)
         if new_camera is not None:
-            self.camera.changed.disconnect(self.redraw_and_update)
-            self.camera = new_camera
-            self.camera.changed.connect(self.redraw_and_update)
+            self.flush_camera()
+            self.connect_camera(new_camera)
             self.redraw_and_update()
         
-
-
+    def mysql_load_boxes(self, conn):
+        # TODO : actually don't flush until we are sure we've loaded everything from DB correctly
+        self.flush_boxes()
+        return self.planar_world.mysql_load_boxes(conn)
+            
+    def flush_boxes(self):
+        self.planar_world.flush_boxes()
         
