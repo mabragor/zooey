@@ -4,7 +4,7 @@
 from __future__ import with_statement
 
 from PyQt4 import (QtCore, QtGui)
-from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor)
+from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor, QColor)
 from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize, QString, QObject, pyqtSignal, pyqtSlot)
 import time
 import random
@@ -220,7 +220,17 @@ def load_boxes_iter(conn, world_id):
     cur.execute('select box_id, under_object_id, x, y, w, h, cut_line from boxes_' + str(world_id))
     for (box_id, under_object_id, x, y, w, h, cut_line) in cur:
         # print "LOAD_BOXES_ITER", box_id, under_object_id, x, y, w, h, cut_line
-        yield ColoredBox(x=x, y=y, w=w, h=h, id=box_id, cut_line=cut_line)
+        yield ColoredBox(x=x, y=y, w=w, h=h, id=box_id, cut_line=cut_line, under_id=under_object_id,
+                         color=True)
+
+def load_colors_iter(conn, world_id):
+    cur = conn.cursor()
+    cur.execute('''
+select u.under_object_id, u.a, u.r, u.g, u.b 
+    from (select distinct(under_object_id) from boxes_%s) as t1 left join under_objects as u
+    on t1.under_object_id = u.under_object_id''' % world_id)
+    for (under_id, a, r, g, b) in cur:
+        yield Color(id=under_id, color=QColor(r, g, b, alpha=a))
         
     
 class ChangingObject(QObject):
@@ -308,39 +318,47 @@ COLORS = ["white", "black", "red", "darkRed", "green", "darkGreen",
           "yellow", "darkYellow", "gray", "darkGray", "lightGray"]
 
 class Color(ChangingObject):
-    def __init__(self, color=None):
+    def __init__(self, color=None, id=None):
         super(Color, self).__init__()
         self.change(color)
+        self.id = id
 
     def copy(self):
         return Color(self._color)
         
     def change(self, new_color=None):
         if new_color is None:
-            self._color = random.randint(0, len(COLORS) - 1)
+            self._sub_color = random.randint(0, len(COLORS) - 1)
+            self.mix_color()
         elif new_color == 'next':
-            self._color = (self._color + 1) % len(COLORS)
+            if self._sub_color = None:
+                self._sub_color = 0
+            self._sub_color = (self._sub_color + 1) % len(COLORS)
+            self.mix_color()
         else:
+            self._sub_color = None
             self._color = new_color
         self.changed.emit()
 
-    def color(self):
-        return getattr(QtCore.Qt, COLORS[self._color])
+    def mix_color(self):
+        self._color = getattr(QtCore.Qt, COLORS[self._sub_color])
+        return self._color
         
     def draw(self, image):
-        image.fill(self.color())
+        image.fill(self._color)
 
         
 
 class ColoredBox(ChangingObject):
     def __init__(self, x=0, y=0, w=COLORED_BOX_INIT_SIZE, h=COLORED_BOX_INIT_SIZE, color=None, id=None,
-                 cut_line=0.5):
+                 cut_line=0.5, under_id=None):
         super(ColoredBox, self).__init__()
         self.x = float(x) # x and y are coordinates of the CENTER of the box (center of mass if you will)
         self.y = float(y)
         self.w = float(w)
         self.h = float(h)
         self.id = id
+        self.under_id = id
 
         self.init_color(color)
 
@@ -348,6 +366,8 @@ class ColoredBox(ChangingObject):
             
         self._image = None
         self._cache_valid = False
+
+        self.changed_from_db_POV = False
 
     def init_color(self, color):
         # the value True means we do shallow copy (and don't have an underlying color object)
@@ -391,12 +411,15 @@ class ColoredBox(ChangingObject):
         else:
             raise Exception("Unexpected scaling type: %s" % scaling_type)
 
+        self.changed_from_db_POV = True
         self.on_change()
         return self
 
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
+                
+        self.changed_from_db_POV = True
         # here the trick is that cached image is still valid -- that's why we don't call on_change
         self.changed.emit()
         return self
@@ -463,7 +486,8 @@ class ColoredBox(ChangingObject):
             self.cut_line = 0.0
         if self.cut_line > 1.0:
             self.cut_line = 1.0
-            
+
+        self.changed_from_db_POV = True            
         self.changed.emit()
 
     @staticmethod
@@ -720,8 +744,14 @@ class PlanarWorld(ChangingObject):
         self.get_focused(1).move_cutline(dy)
 
     def mysql_load_boxes(self, conn):
+        colors = {}
+        for color in load_colors_iter(conn, self.id or 1):
+            colors[color.id] = color
+            
         for box in load_boxes_iter(conn, self.id or 1):
             self.add_box(box)
+            box.init_color(colors[box.under_id])
+            
         self.changed.emit()
 
     def serialize_changed_boxes(self):
