@@ -24,6 +24,14 @@ class NewColoredBoxes(QWidget):
         self.showFullScreen()
         self.show()
 
+    def stop(self):
+        self.hide()
+        QtCore.QCoreApplication.instance().quit()
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Escape:
+            self.stop()
+
 
 if __name__ == '__main__':
     
