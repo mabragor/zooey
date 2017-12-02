@@ -67,6 +67,7 @@ class NewColoredBoxes(QWidget):
         # ### The objects (contained) in the current widget
         self.objects = []
         self.active_object = None
+        self.delta_vector = QPoint(0, 0)
         
         self.hide()
 
@@ -98,7 +99,11 @@ class NewColoredBoxes(QWidget):
         if self.active_object is not None:
             self.objects.append(self.active_object)
             self.active_object = None
-                
+
+    def mouseMoveEvent(self, event):
+        if self.active_object is not None:
+            self.active_object.center = event.pos() + self.delta_vector
+            
     def find_object_at_point(self, x, y):
         for obj in reversed(self.objects):
             if obj.contains(x, y):
@@ -110,6 +115,7 @@ class NewColoredBoxes(QWidget):
         if it is not None:
             self.active_object = it
             self.objects.remove(it)
+            self.delta_vector = it.center - event.pos()
             self.update()
 
     def add_circle_at_point(self, x, y):
