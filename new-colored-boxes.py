@@ -79,9 +79,19 @@ class NewColoredBoxes(QWidget):
         self.hide()
         QtCore.QCoreApplication.instance().quit()
 
+    def debug_output(self):
+        print "### DEBUG OUTPUT ###"
+        print "Objects:"
+        for obj in self.objects:
+            print "  ", obj.center
+        print "Active object:"
+        print "  ", self.active_object
+        
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:
             self.stop()
+        elif event.key() == QtCore.Qt.Key_D:
+            self.debug_output()
 
     def mousePressEvent(self, event):
         if event.modifiers() == QtCore.Qt.ControlModifier:
@@ -103,6 +113,7 @@ class NewColoredBoxes(QWidget):
     def mouseMoveEvent(self, event):
         if self.active_object is not None:
             self.active_object.center = event.pos() + self.delta_vector
+            self.update()
             
     def find_object_at_point(self, x, y):
         for obj in reversed(self.objects):
