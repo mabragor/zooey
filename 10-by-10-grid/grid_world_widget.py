@@ -1,5 +1,5 @@
 from PyQt4 import (QtCore, QtGui)
-from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor)
+from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor, QColor)
 from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize, QString)
 import time
 import random
@@ -37,7 +37,10 @@ class ColoredBox(object):
         p.begin(image)
         p.fillRect(i * (SKIP_SIZE + BOX_SIZE),
                    j * (SKIP_SIZE + BOX_SIZE),
-                   BOX_SIZE, BOX_SIZE)
+                   BOX_SIZE,
+                   BOX_SIZE,
+                   apply(QColor, self.color))
+
         p.end()
 
 class GridWorld(object):
@@ -65,7 +68,20 @@ class GridWorld(object):
             for j, box in enumerate(row):
                 if box:
                     box.draw(image, i, j)
-        
+
+    def try_create_box_at_point(self, i, j):
+        if self._field[i][j]:
+            return None
+        it = ColoredBox()
+        self._field[i][j] = it
+        return it
+                    
+def coerce_to_grid(coord, size):
+    i = coord / (BOX_SIZE + SKIP_SIZE)
+    if (i < size) and (coord % (BOX_SIZE + SKIP_SIZE) < BOX_SIZE):
+        return i
+    return None
+                    
 class GridWorldWidget(QWidget):
     def __init__(self):
         super(GridWorldWidget, self).__init__(None)
@@ -109,9 +125,17 @@ class GridWorldWidget(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
-            pass
+            i = coerce_to_grid(event.x(), THE_WIDTH)
+            j = coerce_to_grid(event.y(), THE_HEIGHT)
+            if i and j:
+                if self.world.try_create_box_at_point(i, j):
+                    self.redraw_and_update()
         elif event.button() == QtCore.Qt.RightButton:
-            pass
+            i = coerce_to_grid(event.x(), THE_WIDTH)
+            j = coerce_to_grid(event.y(), THE_HEIGHT)
+            if i and j:
+                if self.world.try_select_box_at_point(i, j):
+                    self.redraw_and_update()
         else:
             return
         
