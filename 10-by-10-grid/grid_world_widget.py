@@ -215,8 +215,10 @@ class MoveBoxAction(Action):
         it = self._grid_world.selected_box()
         if it is not None:
             (self._i, self._j) = self._grid_world.box_position(it)
-            if self._grid_world.point_in_bounds_p(self._i + self._delta_i,
-                                                  self._j + self._delta_j):
+            if (self._grid_world.point_in_bounds_p(self._i + self._delta_i,
+                                                   self._j + self._delta_j)
+                and self._grid_world.cell_is_free(self._i + self._delta_i,
+                                                  self._j + self._delta_j)):
                 self._my_box = it
                 return True
         return False
