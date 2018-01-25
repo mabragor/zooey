@@ -23,15 +23,88 @@ CYAN = (0, 255, 255)
 
 ALLCOLORS = (RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN)
 
-class ColoredBox(object):
-    def __init__(self):
-        self.color = RED
+class ReversibleChange(object):
+    def make(self):
+        pass
+    def inverse(self):
+        pass
 
-    def randomly_change_color(self):
+class ChangeBoxColorReversibleChange(ReversibleChange):
+    def __init__(self, world=None, box_id=None, from_color=None, to_color=None):
+        super(ChangeBoxColorReversibleChange, self).__init__()
+        self._world = world
+        self._box_id = box_id
+        self._from_color = from_color
+        self._to_color = to_color
+
+    def inverse(self):
+        return ChangeBoxColorReversibleChange(world=self._world,
+                                              box_id=self._box_id,
+                                              from_color=self._to_color,
+                                              to_color=self._from_color)
+    
+    def make(self):
+        it = self._world.find_box_by_id(self._box_id)
+        if it is None:
+            raise "Couldn't find a box on which to perform change color action"
+        it.color = self._to_color
+    
+
+class Action(object):
+    def __init__(self):
+        self.change = None
+        
+    def guard(self):
+        '''The predicate that should succeed for a command to be applicable (by the user).
+        Always succeeds by default.'''
+        return True
+    
+    def precalculate(self):
+        ### The aim of this method is to set self.change to some reversible change object
+        pass
+
+    def __call__(self):
+        ### Just for convenience we declare this calling interface
+        return self.act()
+    
+    def act(self):
+        '''Returns True if action was performed and False otherwise'''
+        if self.guard():
+            self.precalculate()
+            self.change.make()
+            return True
+        return False
+    
+class ChangeSelectedBoxColorAction(Action):
+    def __init__(self, grid_world):
+        super(ChangeSelectedBoxColorAction, self).__init__()
+        self._grid_world = grid_world
+        self._my_box = None
+
+    def guard(self):
+        it = self._grid_world.selected_box()
+        if it is not None:
+            self._my_box = it
+            return True
+        return False
+
+    def precalculate(self):
+        self.change = ChangeBoxColorReversibleChange(world=self._grid_world,
+                                                     box_id=self._my_box.ID,
+                                                     from_color=self._my_box.color,
+                                                     to_color=self._my_box.new_random_color())
+                                                     
+    
+class ColoredBox(object):
+    def __init__(self, id=None):
+        self.color = RED
+        self.ID = id
+
+    def new_random_color(self):
         newcolor = ALLCOLORS[random.randint(0, len(ALLCOLORS)-1)]
         while self.color == newcolor:
             newcolor = ALLCOLORS[random.randint(0, len(ALLCOLORS)-1)]
-        self.color = newcolor
+        return newcolor
         
     def draw(self, image, i, j):
         p = QPainter()
@@ -49,6 +122,10 @@ class GridWorld(object):
         self._field = [[None for x in xrange(THE_WIDTH)] for y in xrange(THE_HEIGHT)]
         self._select_i = None
         self._select_j = None
+
+        self._boxes = {}
+
+        self._free_id_counter = 0
     
     def draw(self, image):
         ### Obviously, for now we are pretty coupled to Qt
@@ -86,8 +163,11 @@ class GridWorld(object):
     def try_create_box_at_point(self, i, j):
         if self._field[i][j] is not None:
             return None
-        it = ColoredBox()
+        it = ColoredBox(id=self._free_id_counter)
+        self._boxes[self._free_id_counter] = it
         self._field[i][j] = it
+        self._free_id_counter += 1
+
         return it
 
     def try_select_box_at_point(self, i, j):
@@ -97,15 +177,27 @@ class GridWorld(object):
             return True
         return None
 
-    def try_change_selected_box_color(self):
+    def find_box_by_id(self, id):
+        return self._boxes.get(id, None)
+
+    ### The previous version of changing of box color,
+    ### which we now try to convert to the Action-interface.
+    # def try_change_selected_box_color(self):
+    #     i = self._select_i
+    #     j = self._select_j
+    #     if i is not None and j is not None:
+    #         it = self._field[i][j]
+    #         if it is not None:
+    #             it.randomly_change_color()
+    #             return True
+    #     return False
+
+    def selected_box(self):
         i = self._select_i
         j = self._select_j
         if i is not None and j is not None:
-            it = self._field[i][j]
-            if it is not None:
-                it.randomly_change_color()
-                return True
-        return False
+            return self._field[i][j]
+        return None
     
     def try_delete_selected_box(self):
         i = self._select_i
@@ -113,9 +205,12 @@ class GridWorld(object):
         if i is not None and j is not None:
             it = self._field[i][j]
             if it is not None:
+                id = it.ID
                 self._field[i][j] = None
+                del self._boxes[id]
                 self._select_i = None
                 self._select_j = None
+                
                 return True
         return False
 
@@ -185,6 +280,15 @@ class GridWorldWidget(QWidget):
         self.make_new_qimage(self.frameSize())
         self.show()
 
+        ### Initialize keybindings : later we'll do this in the separate interface layer,
+        ### so it can be kludgy for now.
+        self.key_press_dict = { QtCore.Qt.Key_Up : self.world.try_move_selected_box_up,
+                                QtCore.Qt.Key_Down : self.world.try_move_selected_box_down,
+                                QtCore.Qt.Key_Left : self.world.try_move_selected_box_left,
+                                QtCore.Qt.Key_Right : self.world.try_move_selected_box_right,
+                                QtCore.Qt.Key_Space : ChangeSelectedBoxColorAction(self.world),
+                                QtCore.Qt.Key_D : self.world.try_delete_selected_box }
+        
     def start(self):
         # self.showFullScreen()
         self.show()
@@ -212,18 +316,11 @@ class GridWorldWidget(QWidget):
         if event.isAutoRepeat():
             return
 
-        key_press_dict = { QtCore.Qt.Key_Up : self.world.try_move_selected_box_up,
-                           QtCore.Qt.Key_Down : self.world.try_move_selected_box_down,
-                           QtCore.Qt.Key_Left : self.world.try_move_selected_box_left,
-                           QtCore.Qt.Key_Right : self.world.try_move_selected_box_right,
-                           QtCore.Qt.Key_Space : self.world.try_change_selected_box_color,
-                           QtCore.Qt.Key_D : self.world.try_delete_selected_box }
-        
         if event.key() == QtCore.Qt.Key_Escape:
             self.stop()
             return
         else:
-            it = key_press_dict.get(event.key(), None)
+            it = self.key_press_dict.get(event.key(), None)
             if it:
                 if it():
                     self.redraw_and_update()
