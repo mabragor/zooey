@@ -3,6 +3,8 @@ from PyQt4.QtGui import (QWidget, QImage, QPainter, QCursor, QColor)
 from PyQt4.QtCore import (QRectF, QPointF, QSizeF, QSize, QString)
 import time
 import random
+from itertools import imap
+from operator import add, sub
 
 THE_WIDTH = 10
 THE_HEIGHT = 10
@@ -85,6 +87,22 @@ class CreateBoxReversibleChange(ReversibleChange):
     def make(self):
         self._world.create_box(self._box_id, self._i, self._j, self._color)
 
+class MoveBoxReversibleChange(ReversibleChange):
+    def __init__(self, world=None, box_id=None, position=None, delta=None):
+        super(MoveBoxReversibleChange, self).__init__()
+        self._world = world
+        self._box_id = box_id
+        self._position = position
+        self._delta = delta
+
+    def inverse(self):
+        return MoveBoxReversibleChange(world=self._world,
+                                       box_id=self._box_id,
+                                       position=tuple(imap(add, self._position, self._delta)),
+                                       delta=tuple(imap(sub, self._delta)))
+
+    def make(self):
+        self._world.move_box(self._box_id, self._position, self._delta)
         
 class Action(object):
     def __init__(self):
@@ -99,6 +117,10 @@ class Action(object):
         ### The aim of this method is to set self.change to some reversible change object
         pass
 
+    def finalize(self):
+        ### The aim of this method is to perform various auxiliary actions, which do not need to be replayed later
+        pass
+    
     def __call__(self):
         ### Just for convenience we declare this calling interface
         return self.act()
@@ -108,6 +130,7 @@ class Action(object):
         if self.guard():
             self.precalculate()
             self.change.make()
+            self.finalize()
             return True
         return False
     
@@ -148,6 +171,9 @@ class DeleteSelectedBoxAction(Action):
         self.change = DeleteBoxReversibleChange(world=self._grid_world,
                                                 box_id=self._my_box.ID)
 
+    def finalize(self):
+        self._grid_world.deselect()
+
 class CreateBoxAction(Action):
     def __init__(self, grid_world):
         super(CreateBoxAction, self).__init__()
@@ -174,8 +200,62 @@ class CreateBoxAction(Action):
                                                 j=self._j,
                                                 color=ColoredBox.default_color())
 
+class MoveBoxAction(Action):
+    def __init__(self, grid_world):
+        super(MoveBoxAction, self).__init__()
+        self._grid_world = grid_world
+        self._my_box = None
+        self._i = None
+        self._j = None
+        ### These two need to be redefined by the concrete subclasses:
+        self._delta_i = None
+        self._delta_j = None
+
+    def guard(self):
+        it = self._grid_world.selected_box()
+        if it is not None:
+            (self._i, self._j) = self._grid_world.box_position(it)
+            if self._grid_world.point_in_bounds_p(self._i + self._delta_i,
+                                                  self._j + self._delta_j):
+                self._my_box = it
+                return True
+        return False
+
+    def precalculate(self):
+        self.change = MoveBoxReversibleChange(world=self._grid_world,
+                                              box_id=self._my_box.ID,
+                                              position=self._grid_world.selected_position(),
+                                              delta=(self._delta_i, self._delta_j))
+
+    def finalize(self):
+        self._grid_world.move_selection((self._delta_i, self._delta_j))
         
-    
+        
+class MoveBoxUpAction(MoveBoxAction):
+    def __init__(self, grid_world):
+        super(MoveBoxUpAction, self).__init__(grid_world)
+        self._delta_i = 0
+        self._delta_j = -1
+
+class MoveBoxDownAction(MoveBoxAction):
+    def __init__(self, grid_world):
+        super(MoveBoxDownAction, self).__init__(grid_world)
+        self._delta_i = 0
+        self._delta_j = 1
+
+class MoveBoxLeftAction(MoveBoxAction):
+    def __init__(self, grid_world):
+        super(MoveBoxLeftAction, self).__init__(grid_world)
+        self._delta_i = -1
+        self._delta_j = 0
+
+class MoveBoxRightAction(MoveBoxAction):
+    def __init__(self, grid_world):
+        super(MoveBoxRightAction, self).__init__(grid_world)
+        self._delta_i = 1
+        self._delta_j = 0
+        
+        
 class ColoredBox(object):
     def __init__(self, id=None, color=None):
         if color is None:
@@ -256,16 +336,6 @@ class GridWorld(object):
     def new_object_id(self):
         return self._free_id_counter
     
-    # def try_create_box_at_point(self, i, j):
-    #     if self._field[i][j] is not None:
-    #         return None
-    #     it = ColoredBox(id=self._free_id_counter)
-    #     self._boxes[self._free_id_counter] = it
-    #     self._field[i][j] = it
-    #     self._free_id_counter += 1
-
-    #     return it
-
     def try_select_box_at_point(self, i, j):
         if self._field[i][j] is not None:
             self._select_i = i
@@ -283,18 +353,6 @@ class GridWorld(object):
                     return (i, j)
         raise "Box position was not found, which is unacceptable for internal function"
 
-    ### The previous version of changing of box color,
-    ### which we now try to convert to the Action-interface.
-    # def try_change_selected_box_color(self):
-    #     i = self._select_i
-    #     j = self._select_j
-    #     if i is not None and j is not None:
-    #         it = self._field[i][j]
-    #         if it is not None:
-    #             it.randomly_change_color()
-    #             return True
-    #     return False
-
     def selected_box(self):
         i = self._select_i
         j = self._select_j
@@ -302,6 +360,23 @@ class GridWorld(object):
             return self._field[i][j]
         return None
 
+    def deselect(self):
+        self._select_i = None
+        self._select_j = None
+    
+    def selected_position(self):
+        i = self._select_i
+        j = self._select_j
+        if i is None or j is None:
+            raise "Selection position should be definite when calling this utility function."
+        return (i, j)
+
+    def point_in_bounds_p(self, i, j):
+        return ((i >= 0)
+                and (i < THE_WIDTH)
+                and (j >= 0)
+                and (j < THE_HEIGHT))
+    
     def delete_box(self, box_id, i, j):
         self._field[i][j] = None
         del self._boxes[box_id]
@@ -314,74 +389,19 @@ class GridWorld(object):
         self._boxes[box_id] = box
         if self._free_id_counter == box_id:
             self._free_id_counter += 1
-            
-    # def try_delete_selected_box(self):
-    #     i = self._select_i
-    #     j = self._select_j
-    #     if i is not None and j is not None:
-    #         it = self._field[i][j]
-    #         if it is not None:
-    #             id = it.ID
-    #             self._field[i][j] = None
-    #             del self._boxes[id]
-    #             self._select_i = None
-    #             self._select_j = None
-                
-    #             return True
-    #     return False
 
-    def try_move_selected_box_up(self):
-        i = self._select_i
-        j = self._select_j
-        if i is not None and j is not None and j > 0:
-            it = self._field[i][j]
-            it_up = self._field[i][j-1]
-            if it is not None and it_up is None:
-                self._field[i][j-1] = it
-                self._field[i][j] = None
-                self._select_j -= 1
-                return True
-        return False
+    def move_box(self, box_id, position, delta):
+        it = self._field[position[0]][position[1]]
+        self._field[position[0]][position[1]] = None
+        self._field[position[0] + delta[0]][position[1] + delta[1]] = it
 
-    def try_move_selected_box_down(self):
-        i = self._select_i
-        j = self._select_j
-        if i is not None and j is not None and j < THE_HEIGHT - 1:
-            it = self._field[i][j]
-            it_down = self._field[i][j+1]
-            if it is not None and it_down is None:
-                self._field[i][j+1] = it
-                self._field[i][j] = None
-                self._select_j += 1
-                return True
-        return False
-
-    def try_move_selected_box_left(self):
-        i = self._select_i
-        j = self._select_j
-        if i is not None and j is not None and i > 0:
-            it = self._field[i][j]
-            it_left = self._field[i-1][j]
-            if it is not None and it_left is None:
-                self._field[i-1][j] = it
-                self._field[i][j] = None
-                self._select_i -= 1
-                return True
-        return False
-
-    def try_move_selected_box_right(self):
-        i = self._select_i
-        j = self._select_j
-        if i is not None and j is not None and i < THE_WIDTH - 1:
-            it = self._field[i][j]
-            it_right = self._field[i+1][j]
-            if it is not None and it_right is None:
-                self._field[i+1][j] = it
-                self._field[i][j] = None
-                self._select_i += 1
-                return True
-        return False
-    
+    def move_selection(self, delta):
+        if (self._select_i is None
+            or self._select_j is None):
+            raise "Selection should be definite when calling this utility function"
+        self._select_i += delta[0]
+        self._select_j += delta[1]
+        
     
 def coerce_to_grid(coord, size):
     i = coord / (BOX_SIZE + SKIP_SIZE)
@@ -398,10 +418,10 @@ class GridWorldWidget(QWidget):
 
         ### Initialize keybindings : later we'll do this in the separate interface layer,
         ### so it can be kludgy for now.
-        self.key_press_dict = { QtCore.Qt.Key_Up : self.world.try_move_selected_box_up,
-                                QtCore.Qt.Key_Down : self.world.try_move_selected_box_down,
-                                QtCore.Qt.Key_Left : self.world.try_move_selected_box_left,
-                                QtCore.Qt.Key_Right : self.world.try_move_selected_box_right,
+        self.key_press_dict = { QtCore.Qt.Key_Up : MoveBoxUpAction(self.world),
+                                QtCore.Qt.Key_Down : MoveBoxDownAction(self.world),
+                                QtCore.Qt.Key_Left : MoveBoxLeftAction(self.world),
+                                QtCore.Qt.Key_Right : MoveBoxRightAction(self.world),
                                 QtCore.Qt.Key_Space : ChangeSelectedBoxColorAction(self.world),
                                 QtCore.Qt.Key_D : DeleteSelectedBoxAction(self.world) }
         self.mouse_click_dict = { QtCore.Qt.LeftButton : CreateBoxAction(self.world),
