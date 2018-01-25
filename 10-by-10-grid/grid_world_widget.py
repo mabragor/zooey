@@ -8,6 +8,7 @@ THE_WIDTH = 10
 THE_HEIGHT = 10
 BOX_SIZE = 40
 SKIP_SIZE = 5
+FOCUS_LINE_WIDTH = 6
 
 GRAY = (100, 100, 100)
 NAVYBLUE = (60, 60, 100)
@@ -46,11 +47,14 @@ class ColoredBox(object):
 class GridWorld(object):
     def __init__(self):
         self._field = [[None for x in xrange(THE_WIDTH)] for y in xrange(THE_HEIGHT)]
+        self._select_i = None
+        self._select_j = None
     
     def draw(self, image):
         ### Obviously, for now we are pretty coupled to Qt
         self.draw_empty_board(image)
         self.draw_boxes(image)
+        self.draw_selection(image)
 
     def draw_empty_board(self, image):
         image.fill(QtCore.Qt.white)
@@ -63,6 +67,16 @@ class GridWorld(object):
                            BOX_SIZE, BOX_SIZE)
         p.end()
 
+    def draw_selection(self, image):
+        if self._select_i is not None and self._select_j is not None:
+            p = QPainter()
+            p.begin(image)
+            p.setPen(QtGui.QPen(QtCore.Qt.yellow, FOCUS_LINE_WIDTH/2, QtCore.Qt.SolidLine))
+            p.drawRect(- FOCUS_LINE_WIDTH + self._select_i * (SKIP_SIZE + BOX_SIZE),
+                       - FOCUS_LINE_WIDTH + self._select_j * (SKIP_SIZE + BOX_SIZE),
+                       BOX_SIZE + 2 * FOCUS_LINE_WIDTH, BOX_SIZE + 2 * FOCUS_LINE_WIDTH)
+            p.end()
+
     def draw_boxes(self, image):
         for i, row in enumerate(self._field):
             for j, box in enumerate(row):
@@ -70,12 +84,94 @@ class GridWorld(object):
                     box.draw(image, i, j)
 
     def try_create_box_at_point(self, i, j):
-        if self._field[i][j]:
+        if self._field[i][j] is not None:
             return None
         it = ColoredBox()
         self._field[i][j] = it
         return it
-                    
+
+    def try_select_box_at_point(self, i, j):
+        if self._field[i][j] is not None:
+            self._select_i = i
+            self._select_j = j
+            return True
+        return None
+
+    def try_change_selected_box_color(self):
+        i = self._select_i
+        j = self._select_j
+        if i is not None and j is not None:
+            it = self._field[i][j]
+            if it is not None:
+                it.randomly_change_color()
+                return True
+        return False
+    
+    def try_delete_selected_box(self):
+        i = self._select_i
+        j = self._select_j
+        if i is not None and j is not None:
+            it = self._field[i][j]
+            if it is not None:
+                self._field[i][j] = None
+                self._select_i = None
+                self._select_j = None
+                return True
+        return False
+
+    def try_move_selected_box_up(self):
+        i = self._select_i
+        j = self._select_j
+        if i is not None and j is not None and j > 0:
+            it = self._field[i][j]
+            it_up = self._field[i][j-1]
+            if it is not None and it_up is None:
+                self._field[i][j-1] = it
+                self._field[i][j] = None
+                self._select_j -= 1
+                return True
+        return False
+
+    def try_move_selected_box_down(self):
+        i = self._select_i
+        j = self._select_j
+        if i is not None and j is not None and j < THE_HEIGHT - 1:
+            it = self._field[i][j]
+            it_down = self._field[i][j+1]
+            if it is not None and it_down is None:
+                self._field[i][j+1] = it
+                self._field[i][j] = None
+                self._select_j += 1
+                return True
+        return False
+
+    def try_move_selected_box_left(self):
+        i = self._select_i
+        j = self._select_j
+        if i is not None and j is not None and i > 0:
+            it = self._field[i][j]
+            it_left = self._field[i-1][j]
+            if it is not None and it_left is None:
+                self._field[i-1][j] = it
+                self._field[i][j] = None
+                self._select_i -= 1
+                return True
+        return False
+
+    def try_move_selected_box_right(self):
+        i = self._select_i
+        j = self._select_j
+        if i is not None and j is not None and i < THE_WIDTH - 1:
+            it = self._field[i][j]
+            it_right = self._field[i+1][j]
+            if it is not None and it_right is None:
+                self._field[i+1][j] = it
+                self._field[i][j] = None
+                self._select_i += 1
+                return True
+        return False
+    
+    
 def coerce_to_grid(coord, size):
     i = coord / (BOX_SIZE + SKIP_SIZE)
     if (i < size) and (coord % (BOX_SIZE + SKIP_SIZE) < BOX_SIZE):
@@ -115,9 +211,24 @@ class GridWorldWidget(QWidget):
     def keyPressEvent(self, event):
         if event.isAutoRepeat():
             return
+
+        key_press_dict = { QtCore.Qt.Key_Up : self.world.try_move_selected_box_up,
+                           QtCore.Qt.Key_Down : self.world.try_move_selected_box_down,
+                           QtCore.Qt.Key_Left : self.world.try_move_selected_box_left,
+                           QtCore.Qt.Key_Right : self.world.try_move_selected_box_right,
+                           QtCore.Qt.Key_Space : self.world.try_change_selected_box_color,
+                           QtCore.Qt.Key_D : self.world.try_delete_selected_box }
+        
         if event.key() == QtCore.Qt.Key_Escape:
             self.stop()
             return
+        else:
+            it = key_press_dict.get(event.key(), None)
+            if it:
+                if it():
+                    self.redraw_and_update()
+                    return
+        super(GridWorldWidget, self).keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
         if event.isAutoRepeat():
@@ -127,13 +238,13 @@ class GridWorldWidget(QWidget):
         if event.button() == QtCore.Qt.LeftButton:
             i = coerce_to_grid(event.x(), THE_WIDTH)
             j = coerce_to_grid(event.y(), THE_HEIGHT)
-            if i and j:
+            if i is not None and j is not None:
                 if self.world.try_create_box_at_point(i, j):
                     self.redraw_and_update()
         elif event.button() == QtCore.Qt.RightButton:
             i = coerce_to_grid(event.x(), THE_WIDTH)
             j = coerce_to_grid(event.y(), THE_HEIGHT)
-            if i and j:
+            if i is not None and j is not None:
                 if self.world.try_select_box_at_point(i, j):
                     self.redraw_and_update()
         else:
