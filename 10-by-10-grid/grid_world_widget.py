@@ -541,8 +541,8 @@ class GridWorldWidget(QWidget):
     def __init__(self):
         super(GridWorldWidget, self).__init__(None)
         self.world = GridWorld()
-        self.make_new_qimage(self.frameSize())
         self.show()
+        self.make_new_qimage(self.frameSize())
 
         ### Initialize keybindings : later we'll do this in the separate interface layer,
         ### so it can be kludgy for now.
@@ -557,6 +557,10 @@ class GridWorldWidget(QWidget):
                                 QtCore.Qt.Key_Q : self.world.try_redo }
         self.mouse_click_dict = { QtCore.Qt.LeftButton : CreateBoxAction(self.world),
                                   QtCore.Qt.RightButton : self.world.try_select_box_at_point }
+
+    def resizeEvent(self, event):
+        self.make_new_qimage(event.size())
+        self.redraw()
         
     def start(self):
         # self.showFullScreen()
