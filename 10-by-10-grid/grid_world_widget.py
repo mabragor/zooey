@@ -99,7 +99,7 @@ class MoveBoxReversibleChange(ReversibleChange):
         return MoveBoxReversibleChange(world=self._world,
                                        box_id=self._box_id,
                                        position=tuple(imap(add, self._position, self._delta)),
-                                       delta=tuple(imap(sub, self._delta)))
+                                       delta=tuple(imap(lambda x: -x, self._delta)))
 
     def make(self):
         self._world.move_box(self._box_id, self._position, self._delta)
@@ -133,11 +133,19 @@ class Action(object):
             self.finalize()
             return True
         return False
-    
-class ChangeSelectedBoxColorAction(Action):
+
+class GridWorldAction(Action):
     def __init__(self, grid_world):
-        super(ChangeSelectedBoxColorAction, self).__init__()
+        super(GridWorldAction, self).__init__()
         self._grid_world = grid_world
+        
+    def precalculate(self):
+        print "Adding new command to undoredoer"
+        self._grid_world.undoredoer.add_new_cmd(self.change)
+    
+class ChangeSelectedBoxColorAction(GridWorldAction):
+    def __init__(self, grid_world):
+        super(ChangeSelectedBoxColorAction, self).__init__(grid_world)
         self._my_box = None
 
     def guard(self):
@@ -152,12 +160,12 @@ class ChangeSelectedBoxColorAction(Action):
                                                      box_id=self._my_box.ID,
                                                      from_color=self._my_box.color,
                                                      to_color=self._my_box.new_random_color())
+        super(ChangeSelectedBoxColorAction, self).precalculate()
 
 
-class DeleteSelectedBoxAction(Action):
+class DeleteSelectedBoxAction(GridWorldAction):
     def __init__(self, grid_world):
-        super(DeleteSelectedBoxAction, self).__init__()
-        self._grid_world = grid_world
+        super(DeleteSelectedBoxAction, self).__init__(grid_world)
         self._my_box = None
 
     def guard(self):
@@ -170,14 +178,14 @@ class DeleteSelectedBoxAction(Action):
     def precalculate(self):
         self.change = DeleteBoxReversibleChange(world=self._grid_world,
                                                 box_id=self._my_box.ID)
+        super(DeleteSelectedBoxAction, self).precalculate()
 
     def finalize(self):
         self._grid_world.deselect()
 
-class CreateBoxAction(Action):
+class CreateBoxAction(GridWorldAction):
     def __init__(self, grid_world):
-        super(CreateBoxAction, self).__init__()
-        self._grid_world = grid_world
+        super(CreateBoxAction, self).__init__(grid_world)
         self._my_box = None
         self._i = None
         self._j = None
@@ -199,11 +207,11 @@ class CreateBoxAction(Action):
                                                 i=self._i,
                                                 j=self._j,
                                                 color=ColoredBox.default_color())
+        super(CreateBoxAction, self).precalculate()
 
-class MoveBoxAction(Action):
+class MoveBoxAction(GridWorldAction):
     def __init__(self, grid_world):
-        super(MoveBoxAction, self).__init__()
-        self._grid_world = grid_world
+        super(MoveBoxAction, self).__init__(grid_world)
         self._my_box = None
         self._i = None
         self._j = None
@@ -228,6 +236,7 @@ class MoveBoxAction(Action):
                                               box_id=self._my_box.ID,
                                               position=self._grid_world.selected_position(),
                                               delta=(self._delta_i, self._delta_j))
+        super(MoveBoxAction, self).precalculate()
 
     def finalize(self):
         self._grid_world.move_selection((self._delta_i, self._delta_j))
@@ -287,6 +296,104 @@ class ColoredBox(object):
 
         p.end()
 
+class DLNode(object):
+    def __init__(self, prev=None, obj=None, next=None):
+        self.prev = prev
+        self.next = next
+        self.obj = obj
+
+    def link_with(self, other):
+        self.next = other
+        other.prev = self
+        return self
+
+    def unlink_prev(self):
+        prev = self.prev
+        prev.next = None
+        self.prev = None
+
+    def unlink_next(self):
+        next = self.next
+        next.prev = None
+        self.next = None
+
+class DLList(object):
+    def __init__(self):
+        ### We always have the dummy node
+        self._nodes = DLNode()
+        self._nodes.prev = self._nodes
+        self._nodes.next = self._nodes
+
+    def push_begin(self, thing):
+        new_cell = DLNode(obj=thing)
+        first = self._nodes.next
+        self._nodes.link_with(new_cell.link_with(first))
+
+    def pop_begin(self):
+        if self._nodes.next == self._nodes:
+            raise IndexError("pop_begin from empty DLList")
+        ret = self._nodes.next.obj
+        self._nodes.link_with(self._nodes.next.next)
+        return ret
+
+    def push_end(self, thing):
+        new_cell = DLNode(obj=thing)
+        last = self._nodes.prev
+        last.link_with(new_cell.link_with(self._nodes))
+
+    def pop_end(self):
+        if self._nodes.prev == self._nodes:
+            raise IndexError("pop_end from empty DLList")
+        ret = self._nodes.prev.obj
+        self._nodes.prev.prev.link_with(self._nodes)
+        return ret
+        
+        
+class UndoRedoer(object):
+    ### The first take on the interface...
+    def can_undo():
+        pass
+    def can_redo():
+        pass
+    def undo():
+        pass
+    def redo():
+        pass
+    def add_new_cmd():
+        pass
+
+class SimpleUndoRedoer(UndoRedoer):
+    def __init__(self):
+        self._cmds = DLList()
+        self._current = self._cmds._nodes
+
+    def add_new_cmd(self, cmd):
+        ### We just add the command after "current", forgetting all other commands
+        ### TODO : make a proper interface to doubly linked list
+        self._cmds._nodes.unlink_prev()
+        self._current.link_with(self._cmds._nodes)
+        self._cmds.push_end(cmd)
+        self._current = self._current.next
+
+    def undo(self):
+        if self._current == self._cmds._nodes:
+            raise "Cannot undo and shouldn't try this utility function without checking first!"
+        self._current.obj.inverse().make()
+        self._current = self._current.prev
+
+    def redo(self):
+        if self._current.next == self._cmds._nodes:
+            raise "Cannot redo and shouldn't try this utility function without checking first!"
+        self._current.next.obj.make()
+        self._current = self._current.next
+
+    def can_undo(self):
+        return self._current != self._cmds._nodes
+
+    def can_redo(self):
+        return self._current.next != self._cmds._nodes
+
+    
 class GridWorld(object):
     def __init__(self):
         self._field = [[None for x in xrange(THE_WIDTH)] for y in xrange(THE_HEIGHT)]
@@ -296,6 +403,9 @@ class GridWorld(object):
         self._boxes = {}
 
         self._free_id_counter = 0
+
+        ### Alright, this is maybe the case to apply some abstract creation pattern, but we'll see...
+        self.undoredoer = SimpleUndoRedoer()
     
     def draw(self, image):
         ### Obviously, for now we are pretty coupled to Qt
@@ -403,6 +513,22 @@ class GridWorld(object):
             raise "Selection should be definite when calling this utility function"
         self._select_i += delta[0]
         self._select_j += delta[1]
+
+    def try_undo(self):
+        if self.undoredoer and self.undoredoer.can_undo():
+            print "Can undo and about to do it!"
+            self.deselect()
+            self.undoredoer.undo()
+            return True
+        return False
+
+    def try_redo(self):
+        if self.undoredoer and self.undoredoer.can_redo():
+            print "Can redo and about to do it!"
+            self.deselect()
+            self.undoredoer.redo()
+            return True
+        return False
         
     
 def coerce_to_grid(coord, size):
@@ -425,7 +551,10 @@ class GridWorldWidget(QWidget):
                                 QtCore.Qt.Key_Left : MoveBoxLeftAction(self.world),
                                 QtCore.Qt.Key_Right : MoveBoxRightAction(self.world),
                                 QtCore.Qt.Key_Space : ChangeSelectedBoxColorAction(self.world),
-                                QtCore.Qt.Key_D : DeleteSelectedBoxAction(self.world) }
+                                QtCore.Qt.Key_D : DeleteSelectedBoxAction(self.world),
+                                ### Alright, we have to start somewhere, even if this code is crappy so what
+                                QtCore.Qt.Key_A : self.world.try_undo,
+                                QtCore.Qt.Key_Q : self.world.try_redo }
         self.mouse_click_dict = { QtCore.Qt.LeftButton : CreateBoxAction(self.world),
                                   QtCore.Qt.RightButton : self.world.try_select_box_at_point }
         
