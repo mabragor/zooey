@@ -48,8 +48,44 @@ class ChangeBoxColorReversibleChange(ReversibleChange):
         if it is None:
             raise "Couldn't find a box on which to perform change color action"
         it.color = self._to_color
-    
 
+class DeleteBoxReversibleChange(ReversibleChange):
+    def __init__(self, world=None, box_id=None):
+        super(DeleteBoxReversibleChange, self).__init__()
+        self._world = world
+        self._box_id = box_id
+        box = self._world.find_box_by_id(box_id)
+        self._color = box.color
+        (self._i, self._j) = self._world.box_position(box)
+
+    def inverse(self):
+        return CreateBoxReversibleChange(world=self._world,
+                                         box_id=self._box_id,
+                                         i=self._i,
+                                         j=self._j,
+                                         color=self._color)
+
+    def make(self):
+        self._world.delete_box(self._box_id, self._i, self._j)
+
+        
+class CreateBoxReversibleChange(ReversibleChange):
+    def __init__(self, world=None, box_id=None, i=None, j=None, color=None):
+        super(CreateBoxReversibleChange, self).__init__()
+        self._world = world
+        self._box_id = box_id
+        self._i = i
+        self._j = j
+        self._color = color
+
+    def inverse(self):
+        return DeleteBoxReversibleChange(world=self._world,
+                                         box_id=self._box_id)
+
+    def make(self):
+        self._world.create_box(self._box_id, self._i, self._j, self._color)
+
+        
 class Action(object):
     def __init__(self):
         self.change = None
@@ -93,13 +129,65 @@ class ChangeSelectedBoxColorAction(Action):
                                                      box_id=self._my_box.ID,
                                                      from_color=self._my_box.color,
                                                      to_color=self._my_box.new_random_color())
-                                                     
+
+
+class DeleteSelectedBoxAction(Action):
+    def __init__(self, grid_world):
+        super(DeleteSelectedBoxAction, self).__init__()
+        self._grid_world = grid_world
+        self._my_box = None
+
+    def guard(self):
+        it = self._grid_world.selected_box()
+        if it is not None:
+            self._my_box = it
+            return True
+        return False
+
+    def precalculate(self):
+        self.change = DeleteBoxReversibleChange(world=self._grid_world,
+                                                box_id=self._my_box.ID)
+
+class CreateBoxAction(Action):
+    def __init__(self, grid_world):
+        super(CreateBoxAction, self).__init__()
+        self._grid_world = grid_world
+        self._my_box = None
+        self._i = None
+        self._j = None
+
+    def __call__(self, i, j):
+        return self.act(i, j)
+
+    def act(self, i, j):
+        self._i = i
+        self._j = j
+        return super(CreateBoxAction, self).act()
+
+    def guard(self):
+        return self._grid_world.cell_is_free(self._i, self._j)
+
+    def precalculate(self):
+        self.change = CreateBoxReversibleChange(world=self._grid_world,
+                                                box_id=self._grid_world.new_object_id(),
+                                                i=self._i,
+                                                j=self._j,
+                                                color=ColoredBox.default_color())
+
+        
     
 class ColoredBox(object):
-    def __init__(self, id=None):
-        self.color = RED
+    def __init__(self, id=None, color=None):
+        if color is None:
+            self.color = self.default_color()
+        else:
+            self.color = color
         self.ID = id
 
+    @staticmethod
+    def default_color():
+        return RED
+        
     def new_random_color(self):
         newcolor = ALLCOLORS[random.randint(0, len(ALLCOLORS)-1)]
         while self.color == newcolor:
@@ -160,15 +248,23 @@ class GridWorld(object):
                 if box:
                     box.draw(image, i, j)
 
-    def try_create_box_at_point(self, i, j):
-        if self._field[i][j] is not None:
-            return None
-        it = ColoredBox(id=self._free_id_counter)
-        self._boxes[self._free_id_counter] = it
-        self._field[i][j] = it
-        self._free_id_counter += 1
+    def cell_is_free(self, i, j):
+        return ((i is not None)
+                and (j is not None)
+                and self._field[i][j] is None)
 
-        return it
+    def new_object_id(self):
+        return self._free_id_counter
+    
+    # def try_create_box_at_point(self, i, j):
+    #     if self._field[i][j] is not None:
+    #         return None
+    #     it = ColoredBox(id=self._free_id_counter)
+    #     self._boxes[self._free_id_counter] = it
+    #     self._field[i][j] = it
+    #     self._free_id_counter += 1
+
+    #     return it
 
     def try_select_box_at_point(self, i, j):
         if self._field[i][j] is not None:
@@ -179,6 +275,13 @@ class GridWorld(object):
 
     def find_box_by_id(self, id):
         return self._boxes.get(id, None)
+
+    def box_position(self, box):
+        for i, row in enumerate(self._field):
+            for j, elt_box in enumerate(row):
+                if box == elt_box:
+                    return (i, j)
+        raise "Box position was not found, which is unacceptable for internal function"
 
     ### The previous version of changing of box color,
     ### which we now try to convert to the Action-interface.
@@ -198,21 +301,34 @@ class GridWorld(object):
         if i is not None and j is not None:
             return self._field[i][j]
         return None
-    
-    def try_delete_selected_box(self):
-        i = self._select_i
-        j = self._select_j
-        if i is not None and j is not None:
-            it = self._field[i][j]
-            if it is not None:
-                id = it.ID
-                self._field[i][j] = None
-                del self._boxes[id]
-                self._select_i = None
-                self._select_j = None
+
+    def delete_box(self, box_id, i, j):
+        self._field[i][j] = None
+        del self._boxes[box_id]
+        if self._free_id_counter == 1 + box_id:
+            self._free_id_counter -= 1
+
+    def create_box(self, box_id, i, j, color):
+        box = ColoredBox(id=box_id, color=color)
+        self._field[i][j] = box
+        self._boxes[box_id] = box
+        if self._free_id_counter == box_id:
+            self._free_id_counter += 1
+            
+    # def try_delete_selected_box(self):
+    #     i = self._select_i
+    #     j = self._select_j
+    #     if i is not None and j is not None:
+    #         it = self._field[i][j]
+    #         if it is not None:
+    #             id = it.ID
+    #             self._field[i][j] = None
+    #             del self._boxes[id]
+    #             self._select_i = None
+    #             self._select_j = None
                 
-                return True
-        return False
+    #             return True
+    #     return False
 
     def try_move_selected_box_up(self):
         i = self._select_i
@@ -287,7 +403,9 @@ class GridWorldWidget(QWidget):
                                 QtCore.Qt.Key_Left : self.world.try_move_selected_box_left,
                                 QtCore.Qt.Key_Right : self.world.try_move_selected_box_right,
                                 QtCore.Qt.Key_Space : ChangeSelectedBoxColorAction(self.world),
-                                QtCore.Qt.Key_D : self.world.try_delete_selected_box }
+                                QtCore.Qt.Key_D : DeleteSelectedBoxAction(self.world) }
+        self.mouse_click_dict = { QtCore.Qt.LeftButton : CreateBoxAction(self.world),
+                                  QtCore.Qt.RightButton : self.world.try_select_box_at_point }
         
     def start(self):
         # self.showFullScreen()
@@ -332,19 +450,11 @@ class GridWorldWidget(QWidget):
             return
 
     def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
+        cmd = self.mouse_click_dict.get(event.button(), None)
+        if cmd is not None:
             i = coerce_to_grid(event.x(), THE_WIDTH)
             j = coerce_to_grid(event.y(), THE_HEIGHT)
-            if i is not None and j is not None:
-                if self.world.try_create_box_at_point(i, j):
-                    self.redraw_and_update()
-        elif event.button() == QtCore.Qt.RightButton:
-            i = coerce_to_grid(event.x(), THE_WIDTH)
-            j = coerce_to_grid(event.y(), THE_HEIGHT)
-            if i is not None and j is not None:
-                if self.world.try_select_box_at_point(i, j):
-                    self.redraw_and_update()
-        else:
-            return
-        
+            if cmd(i,j):
+                self.redraw_and_update()
+        super(GridWorldWidget, self).mousePressEvent(event)
         
