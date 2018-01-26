@@ -542,7 +542,7 @@ def coerce_to_grid(coord, size):
                     
 class GridWorldWidget(QWidget):
     def __init__(self):
-        super(GridWorldWidget, self).__init__(None)
+        super(GridWorldWidget, self).__init__()
         self.world = GridWorld()
         self.setMinimumSize(THE_WIDTH * BOX_SIZE + SKIP_SIZE * (THE_WIDTH + 1),
                             THE_HEIGHT * BOX_SIZE + SKIP_SIZE * (THE_HEIGHT + 1))

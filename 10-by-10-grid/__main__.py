@@ -2,6 +2,7 @@
 from PyQt4 import QtGui, QtCore
 from PyQt4.QtGui import QApplication, QWidget
 from grid_world_widget import GridWorldWidget
+from letter_list_widget import LetterListWidget
 import sys
 
 class Example(QWidget):
@@ -18,6 +19,7 @@ class Example(QWidget):
         vbox = QtGui.QVBoxLayout()
         vbox.addLayout(hbox)
         vbox.addStretch(1)
+        vbox.addWidget(LetterListWidget())
         self.setLayout(vbox)
 
         ### TODO : we'll change this once we do more fancy input handling
