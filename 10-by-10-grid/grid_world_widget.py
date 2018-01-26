@@ -288,6 +288,7 @@ class ColoredBox(object):
     def draw(self, image, i, j):
         p = QPainter()
         p.begin(image)
+        p.translate(SKIP_SIZE, SKIP_SIZE)
         p.fillRect(i * (SKIP_SIZE + BOX_SIZE),
                    j * (SKIP_SIZE + BOX_SIZE),
                    BOX_SIZE,
@@ -417,6 +418,7 @@ class GridWorld(object):
         image.fill(QtCore.Qt.white)
         p = QPainter()
         p.begin(image)
+        p.translate(SKIP_SIZE, SKIP_SIZE)
         for i in xrange(THE_WIDTH):
             for j in xrange(THE_HEIGHT):
                 p.drawRect(i * (SKIP_SIZE + BOX_SIZE),
@@ -428,6 +430,7 @@ class GridWorld(object):
         if self._select_i is not None and self._select_j is not None:
             p = QPainter()
             p.begin(image)
+            p.translate(SKIP_SIZE, SKIP_SIZE)
             p.setPen(QtGui.QPen(QtCore.Qt.yellow, FOCUS_LINE_WIDTH/2, QtCore.Qt.SolidLine))
             p.drawRect(- FOCUS_LINE_WIDTH + self._select_i * (SKIP_SIZE + BOX_SIZE),
                        - FOCUS_LINE_WIDTH + self._select_j * (SKIP_SIZE + BOX_SIZE),
@@ -532,8 +535,8 @@ class GridWorld(object):
         
     
 def coerce_to_grid(coord, size):
-    i = coord / (BOX_SIZE + SKIP_SIZE)
-    if (i < size) and (coord % (BOX_SIZE + SKIP_SIZE) < BOX_SIZE):
+    i = (coord - SKIP_SIZE) / (BOX_SIZE + SKIP_SIZE)
+    if (i >= 0) and (i < size) and (coord % (BOX_SIZE + SKIP_SIZE) < BOX_SIZE):
         return i
     return None
                     
@@ -541,6 +544,8 @@ class GridWorldWidget(QWidget):
     def __init__(self):
         super(GridWorldWidget, self).__init__(None)
         self.world = GridWorld()
+        self.setMinimumSize(THE_WIDTH * BOX_SIZE + SKIP_SIZE * (THE_WIDTH + 1),
+                            THE_HEIGHT * BOX_SIZE + SKIP_SIZE * (THE_HEIGHT + 1))
         self.show()
         self.make_new_qimage(self.frameSize())
 
