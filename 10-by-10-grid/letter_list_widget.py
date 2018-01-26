@@ -40,7 +40,10 @@ class LetterCircleWidget(QWidget):
     def __init__(self, letter):
         super(LetterCircleWidget, self).__init__()
         self._letter = letter
+        
         self.setMinimumSize(BALL_SIZE, BALL_SIZE)
+        self._region = QtGui.QRegion(QtCore.QRect(-1, -1, BALL_SIZE+2, BALL_SIZE+2), QtGui.QRegion.Ellipse)
+        self.setMask(self._region)
 
         QtGui.QToolTip.setFont(QtGui.QFont('SansSerif', 10))
         self.setToolTip('Letter circle with letter "' + self._letter + '"')
@@ -83,7 +86,8 @@ class LetterListWidget(QWidget):
         self.setMinimumSize(2 * MARGIN_SIZE + BALL_SIZE,
                             2 * MARGIN_SIZE + BALL_SIZE)
 
-        self._letters = ['A', 'B', 'C', 'D']
+        self._letters = map(lambda x: 'A' + str(x),
+                            xrange(20))
 
         hbox = QtGui.QHBoxLayout()
         hbox.addWidget(LetterCircleWidget(self._letters[0]))
