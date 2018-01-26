@@ -13,13 +13,21 @@ class Example(QWidget):
     
     def initUI(self):
         gw = GridWorldWidget()
+
+        llw = LetterListWidget()
+        scroll_area = QtGui.QScrollArea()
+        llw.sizePolicy().setVerticalPolicy(QtGui.QSizePolicy.Fixed)
+        scroll_area.setWidget(llw)
+        scroll_area.setFrameStyle(QtGui.QFrame.Panel | QtGui.QFrame.Raised)
+        scroll_area.setLineWidth(2)
+        
         hbox = QtGui.QHBoxLayout()
         hbox.addWidget(gw)
         hbox.addStretch(1)
         vbox = QtGui.QVBoxLayout()
         vbox.addLayout(hbox)
         vbox.addStretch(1)
-        vbox.addWidget(LetterListWidget())
+        vbox.addWidget(scroll_area)
         self.setLayout(vbox)
 
         ### TODO : we'll change this once we do more fancy input handling

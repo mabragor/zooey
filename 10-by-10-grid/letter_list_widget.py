@@ -87,7 +87,7 @@ class LetterListWidget(QWidget):
                             2 * MARGIN_SIZE + BALL_SIZE)
 
         self._letters = map(lambda x: 'A' + str(x),
-                            xrange(20))
+                            xrange(25))
 
         hbox = QtGui.QHBoxLayout()
         hbox.addWidget(LetterCircleWidget(self._letters[0]))
@@ -103,21 +103,21 @@ class LetterListWidget(QWidget):
         
         self.setLayout(vbox)
 
-    def paintEvent(self, e):
+    # def paintEvent(self, e):
 
-        qp = QtGui.QPainter()
-        qp.begin(self)
-        self.drawWidget(qp)
-        qp.end()
+    #     qp = QtGui.QPainter()
+    #     qp.begin(self)
+    #     self.drawWidget(qp)
+    #     qp.end()
         
-    def drawWidget(self, qp):
-        size = self.size()
-        w = size.width()
-        h = size.height()
+    # def drawWidget(self, qp):
+    #     size = self.size()
+    #     w = size.width()
+    #     h = size.height()
 
-        pen = QtGui.QPen(QtGui.QColor(20, 20, 20), 1, QtCore.Qt.SolidLine)
+    #     pen = QtGui.QPen(QtGui.QColor(20, 20, 20), 1, QtCore.Qt.SolidLine)
 
-        qp.setPen(pen)
-        qp.setBrush(QtCore.Qt.NoBrush)
-        qp.drawRect(0, 0, w-1, h-1)
+    #     qp.setPen(pen)
+    #     qp.setBrush(QtCore.Qt.NoBrush)
+    #     qp.drawRect(0, 0, w-1, h-1)
 
